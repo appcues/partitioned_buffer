@@ -1,0 +1,54 @@
+version: 2.1
+
+workflows:
+  build:
+    jobs:
+      - build:
+          context: Appcues
+
+jobs:
+  build:
+    parallelism: 1
+    docker:
+      - image: cimg/elixir:1.19.4-erlang-27.2.2
+        environment:
+          MIX_ENV: test
+    working_directory: ~/partitioned_buffer
+
+    steps:
+      - checkout
+      - run: mix local.hex --force
+      - run: mix local.rebar --force
+      - run: mix hex.organization auth appcues --key $HEX_API_KEY
+      - restore_cache:
+          keys:
+            - v1-mix-cache-{{ .Branch }}-{{ checksum "mix.lock" }}
+            - v1-mix-cache-{{ .Branch }}
+            - v1-mix-cache
+      - restore_cache:
+          keys:
+            - v1-build-cache-{{ .Branch }}
+            - v1-build-cache
+      - run: mix deps.get
+      - run: mix deps.compile
+      - run: mix deps.unlock --check-unused
+      - run: mix compile --warnings-as-errors
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+      - save_cache:
+          key: v1-mix-cache-{{ .Branch }}-{{ checksum "mix.lock" }}
+          paths: "deps"
+      - save_cache:
+          key: v1-build-cache-{{ .Branch }}
+          paths: "_build"
+      - run: mix coveralls.json
+      - restore_cache:
+          keys:
+            - v1-plt-cache
+      - run:
+          name: Run dialyzer
+          command: mix dialyzer --format short
+      - save_cache:
+          key: v1-plt-cache
+          paths:
+            - priv/plts
