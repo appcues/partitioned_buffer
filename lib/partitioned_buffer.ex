@@ -63,6 +63,11 @@ defmodule PartitionedBuffer do
       messages together. For example, all messages from the same user go to
       the same partition.
 
+    * **MFA tuple**: A tuple of `{Module, Function, Args}` where the function
+      is applied with the message prepended to the arguments (e.g.,
+      `{MyApp.Router, :get_user_id, []}`). Useful for delegating routing logic
+      to a module function while keeping configuration declarative.
+
     * **Static value**: You provide a fixed term (e.g., `:logs`) that is
       used as the routing key for all messages. This gives you explicit
       control over message routing.
@@ -116,21 +121,33 @@ defmodule PartitionedBuffer do
         def start(_type, _args) do
           children = [
             # ... other children ...
-            {PartitionedBuffer,
-             name: :my_buffer,
-             processor: &MyApp.EventProcessor.process_batch/1,
-             processing_interval_ms: 1000,
-             partitions: 4}
+            my_buffer_spec()
           ]
 
           opts = [strategy: :one_for_one, name: MyApp.Supervisor]
           Supervisor.start_link(children, opts)
         end
+
+        defp my_buffer_spec do
+          config =
+            :my_app
+            |> Application.get_env(:my_buffer, [])
+            |> Keyword.merge(
+              name: :my_buffer,
+              processor: &MyApp.EventProcessor.process_batch/1
+            )
+
+          {PartitionedBuffer, config}
+        end
       end
 
-  The buffer will be started as part of your application and its lifecycle will
-  be managed by your application supervisor. All remaining messages will be
-  processed automatically during shutdown.
+  In your configuration file, you can configure the buffer like this:
+
+      config :my_app, :my_buffer,
+        processing_interval_ms: :timer.minutes(1),
+        processing_timeout_ms: :timer.minutes(2),
+        processing_batch_size: 100,
+        partitions: 100
 
   ## Telemetry
 
@@ -159,6 +176,23 @@ defmodule PartitionedBuffer do
 
       * Measurement: `%{duration: native_time}`
       * Metadata: `%{buffer: atom, partition: atom, size: non_neg_integer}`
+
+    * `[:partitioned_buffer, :partition, :processing, :exception]` - Dispatched
+      when an exception occurs during the processing.
+
+      * Measurement: `%{duration: native_time}`
+      * Metadata:
+
+      ```
+      %{
+        buffer: atom,
+        partition: atom,
+        size: non_neg_integer,
+        kind: atom,
+        reason: term,
+        stacktrace: list
+      }
+      ```
 
     * `[:partitioned_buffer, :partition, :processing_failed]` - Dispatched
       when a processing task encounters an error and fails.
@@ -243,6 +277,9 @@ defmodule PartitionedBuffer do
       # Custom partition routing using function
       PartitionedBuffer.write(:my_buffer, user_event, partition_key: &(&1.user_id))
 
+      # Custom partition routing using MFA tuple (message prepended to args)
+      PartitionedBuffer.write(:my_buffer, event, partition_key: {MyApp.Router, :get_partition, []})
+
       # Custom partition routing with fixed key (all messages to same partition)
       PartitionedBuffer.write(:my_buffer, log_entry, partition_key: :logs)
 
@@ -297,14 +334,22 @@ defmodule PartitionedBuffer do
     end
   end
 
+  # The partition key is not provided, use the message hash as the key
   defp partition_key(nil, msg) do
     :erlang.phash2(msg)
   end
 
+  # The partition key is a function, apply it to the message
   defp partition_key(partition_key, msg) when is_function(partition_key, 1) do
     partition_key.(msg)
   end
 
+  # The partition key is an MFA tuple, apply it (the message is prepended to the args)
+  defp partition_key({m, f, a}, msg) when is_atom(m) and is_atom(f) and is_list(a) do
+    apply(m, f, [msg | a])
+  end
+
+  # The partition key is a static value, return it
   defp partition_key(partition_key, _msg) do
     partition_key
   end

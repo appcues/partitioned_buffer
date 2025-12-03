@@ -177,7 +177,10 @@ defmodule PartitionedBuffer.Partition do
   end
 
   # Process task completed successfully
-  def handle_info({ref, :processing_completed}, %__MODULE__{runner_task: %Task{ref: ref}} = state) do
+  def handle_info(
+        {ref, :processing_completed},
+        %__MODULE__{runner_task: %Task{ref: ref}} = state
+      ) do
     # We don't care about the DOWN message now, so let's demonitor and flush it
     Process.demonitor(ref, [:flush])
 
@@ -280,17 +283,6 @@ defmodule PartitionedBuffer.Partition do
       # delete the keys one by one, which could be expensive.
       true = :ets.give_away(current_table, task.pid, :process)
 
-      # Emit a Telemetry event to keep track when the processing starts
-      :telemetry.execute(
-        @telemetry_prefix ++ [:processing, :start],
-        %{system_time: System.system_time()},
-        %{
-          buffer: buffer,
-          partition: partition,
-          size: size
-        }
-      )
-
       # Update the state acknowledging the process is in the "processing" state.
       %{state | processing?: true, runner_task: task, handed_off_table: current_table}
     else
@@ -305,34 +297,30 @@ defmodule PartitionedBuffer.Partition do
     # See `Task.Supervisor.async_nolink/3` for more info
     Process.flag(:trap_exit, true)
 
-    # Get the start time
-    start_time = System.monotonic_time()
+    # Telemetry metadata for the span
+    metadata = %{
+      buffer: buffer,
+      partition: partition,
+      size: size
+    }
 
-    # Receive the table transfer message
-    receive do
-      {:"ETS-TRANSFER", table, ^from, :process} ->
-        # Process the table data in batches to optimize the memory footprint
-        # (avoid loading the entire table into the memory)
-        :ok = process_batch(table, batch_size, processor)
+    # Emit a Telemetry span to keep track of the processing duration
+    :telemetry.span(@telemetry_prefix ++ [:processing], metadata, fn ->
+      # Receive the table transfer message
+      receive do
+        {:"ETS-TRANSFER", table, ^from, :process} ->
+          # Process the table data in batches to optimize the memory footprint
+          # (avoid loading the entire table into the memory)
+          :ok = process_batch(table, batch_size, processor)
 
-        # We can safely delete the table since the data is already processed
-        # and the current buffer points to another table
-        true = :ets.delete(table)
+          # We can safely delete the table since the data is already processed
+          # and the current buffer points to another table
+          true = :ets.delete(table)
 
-        # Emit a Telemetry event to keep track when the processing stops
-        :telemetry.execute(
-          @telemetry_prefix ++ [:processing, :stop],
-          %{duration: System.monotonic_time() - start_time},
-          %{
-            buffer: buffer,
-            partition: partition,
-            size: size
-          }
-        )
-
-        # Acknowledge the process is completed
-        :processing_completed
-    end
+          # Acknowledge the process is completed
+          {:processing_completed, metadata}
+      end
+    end)
   end
 
   # We're starting!
