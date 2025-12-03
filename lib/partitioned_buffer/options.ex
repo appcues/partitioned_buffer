@@ -71,7 +71,7 @@ defmodule PartitionedBuffer.Options do
       Determines what value is used as the routing key for partitioning
       messages.
 
-      Can be one of three values:
+      Can be one of four values:
 
         * `nil` (default): The message itself is used as the routing key.
           Messages with the same content are routed to the same partition.
@@ -79,6 +79,10 @@ defmodule PartitionedBuffer.Options do
         * A function of arity 1: Applied to each message to return the routing
           key. Allows grouping related messages together (e.g., by user ID or
           account ID) to keep them in the same partition.
+
+        * An MFA tuple `{Module, Function, Args}`: The function is applied with
+          the message prepended to the arguments. Useful for delegating routing
+          logic to a module function while keeping configuration declarative.
 
         * Any static term: Used as the routing key for all messages, giving
           explicit control over which partition receives them (e.g., `:logs`,

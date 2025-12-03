@@ -111,6 +111,18 @@ defmodule PartitionedBufferTest do
                      @default_timeout
     end
 
+    test "ok: messages are partitioned using an MFA tuple", %{buffer: buff} do
+      assert PartitionedBuffer.write(buff, %{id: 1, data: "message1"},
+               partition_key: {__MODULE__, :partition_key_fun, []}
+             ) == :ok
+
+      assert PartitionedBuffer.buffer_size(buff) == 1
+
+      assert_receive {@processing_stop_event, %{duration: _},
+                      %{buffer: ^buff, partition: _, size: 1}},
+                     @default_timeout
+    end
+
     test "ok: messages are partitioned using a custom key", %{buffer: buff} do
       assert PartitionedBuffer.write(buff, %{id: 1, data: "message1"}, partition_key: 1) == :ok
 
@@ -294,8 +306,8 @@ defmodule PartitionedBufferTest do
     send(pid, {:process_completed, chunk})
   end
 
-  def partition_key_fun(_) do
-    1
+  def partition_key_fun(%{id: id}) do
+    id
   end
 
   defp attach_telemetry_handler(handler_id \\ self(), events) do
