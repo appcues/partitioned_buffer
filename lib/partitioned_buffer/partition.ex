@@ -300,8 +300,7 @@ defmodule PartitionedBuffer.Partition do
     # Telemetry metadata for the span
     metadata = %{
       buffer: buffer,
-      partition: partition,
-      size: size
+      partition: partition
     }
 
     # Emit a Telemetry span to keep track of the processing duration
@@ -318,7 +317,7 @@ defmodule PartitionedBuffer.Partition do
           true = :ets.delete(table)
 
           # Acknowledge the process is completed
-          {:processing_completed, metadata}
+          {:processing_completed, %{size: size}, metadata}
       end
     end)
   end
