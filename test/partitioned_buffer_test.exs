@@ -58,8 +58,8 @@ defmodule PartitionedBufferTest do
       assert PartitionedBuffer.write(buff, expected_batch1 ++ expected_batch2) == :ok
 
       # Make sure the processing completed
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: ^buff, partition: _, size: 10}},
+      assert_receive {@processing_stop_event, %{duration: _, size: 10},
+                      %{buffer: ^buff, partition: _}},
                      @default_timeout
 
       # Write more message while processing
@@ -74,8 +74,8 @@ defmodule PartitionedBufferTest do
       assert PartitionedBuffer.write(buff, expected_batch2) == :ok
 
       # Make sure the processing completed
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: ^buff, partition: _, size: 5}},
+      assert_receive {@processing_stop_event, %{duration: _, size: 5},
+                      %{buffer: ^buff, partition: _}},
                      @default_timeout
 
       # Check the processed messages
@@ -92,8 +92,8 @@ defmodule PartitionedBufferTest do
       assert PartitionedBuffer.buffer_size(buff) == 1
 
       # Wait for processing to complete
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: ^buff, partition: _, size: 1}},
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
                      @default_timeout
 
       assert_receive {:process_completed, [^msg]}, @default_timeout
@@ -106,8 +106,8 @@ defmodule PartitionedBufferTest do
 
       assert PartitionedBuffer.buffer_size(buff) == 1
 
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: ^buff, partition: _, size: 1}},
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
                      @default_timeout
     end
 
@@ -118,8 +118,8 @@ defmodule PartitionedBufferTest do
 
       assert PartitionedBuffer.buffer_size(buff) == 1
 
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: ^buff, partition: _, size: 1}},
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
                      @default_timeout
     end
 
@@ -128,8 +128,8 @@ defmodule PartitionedBufferTest do
 
       assert PartitionedBuffer.buffer_size(buff) == 1
 
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: ^buff, partition: _, size: 1}},
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
                      @default_timeout
     end
 
@@ -267,12 +267,12 @@ defmodule PartitionedBufferTest do
       :ok = PartitionedBuffer.write(buff, batch)
 
       # Make sure processing completed on both partitions
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: :partitioning_test, partition: p1, size: s1}},
+      assert_receive {@processing_stop_event, %{duration: _, size: s1},
+                      %{buffer: :partitioning_test, partition: p1}},
                      @default_timeout
 
-      assert_receive {@processing_stop_event, %{duration: _},
-                      %{buffer: :partitioning_test, partition: p2, size: s2}},
+      assert_receive {@processing_stop_event, %{duration: _, size: s2},
+                      %{buffer: :partitioning_test, partition: p2}},
                      @default_timeout
 
       # Check the total processed messages
