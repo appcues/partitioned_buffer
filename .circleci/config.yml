@@ -10,7 +10,7 @@ jobs:
   build:
     parallelism: 1
     docker:
-      - image: cimg/elixir:1.19.4-erlang-27.2.2
+      - image: cimg/elixir:1.19.5-erlang-27.2.2
         environment:
           MIX_ENV: test
     working_directory: ~/partitioned_buffer
@@ -44,11 +44,11 @@ jobs:
       - run: mix coveralls.json
       - restore_cache:
           keys:
-            - v1-plt-cache
+            - v2-plt-cache
       - run:
           name: Run dialyzer
           command: mix dialyzer --format short
       - save_cache:
-          key: v1-plt-cache
+          key: v2-plt-cache
           paths:
             - priv/plts

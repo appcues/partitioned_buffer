@@ -1,7 +1,7 @@
 defmodule PartitionedBuffer.MixProject do
   use Mix.Project
 
-  @version "0.1.3"
+  @version "0.2.0"
   @source_url "https://github.com/appcues/partitioned_buffer"
 
   def project do
@@ -54,6 +54,9 @@ defmodule PartitionedBuffer.MixProject do
       {:excoveralls, "~> 0.18", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+
+      # Benchmarks
+      {:benchee, "~> 1.5", only: [:dev, :test]},
 
       # Docs
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}

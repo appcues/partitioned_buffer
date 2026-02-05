@@ -62,7 +62,22 @@ defmodule PartitionedBuffer.Options do
     ]
   ]
 
-  write_opts = [
+  auto_opts = [
+    module: [
+      type: :atom,
+      required: true,
+      doc: """
+      The buffer implementation module (e.g., `PartitionedBuffer.Queue`).
+
+      This option is automatically set when starting a buffer through a
+      specific implementation like `PartitionedBuffer.Queue.start_link/1`.
+      It must be provided explicitly when calling
+      `PartitionedBuffer.start_link/1` directly.
+      """
+    ]
+  ]
+
+  runtime_opts = [
     partition_key: [
       type: :any,
       required: false,
@@ -97,21 +112,24 @@ defmodule PartitionedBuffer.Options do
   ]
 
   # Start options schema
-  @start_opts_schema NimbleOptions.new!(start_opts)
+  @start_opts_schema NimbleOptions.new!(start_opts ++ auto_opts)
 
-  # Write options schema
-  @write_opts_schema NimbleOptions.new!(write_opts)
+  # Start options schema only for docs
+  @start_opts_docs_schema NimbleOptions.new!(start_opts)
+
+  # Runtime options schema
+  @runtime_opts_schema NimbleOptions.new!(runtime_opts)
 
   ## API
 
   @spec start_options_docs() :: binary()
   def start_options_docs do
-    NimbleOptions.docs(@start_opts_schema)
+    NimbleOptions.docs(@start_opts_docs_schema)
   end
 
-  @spec write_options_docs() :: binary()
-  def write_options_docs do
-    NimbleOptions.docs(@write_opts_schema)
+  @spec runtime_options_docs() :: binary()
+  def runtime_options_docs do
+    NimbleOptions.docs(@runtime_opts_schema)
   end
 
   @spec validate_start_options!(keyword()) :: keyword()
@@ -121,8 +139,8 @@ defmodule PartitionedBuffer.Options do
     |> NimbleOptions.validate!(@start_opts_schema)
   end
 
-  @spec validate_write_options!(keyword()) :: keyword()
-  def validate_write_options!(opts) do
-    NimbleOptions.validate!(opts, @write_opts_schema)
+  @spec validate_runtime_options!(keyword()) :: keyword()
+  def validate_runtime_options!(opts) do
+    NimbleOptions.validate!(opts, @runtime_opts_schema)
   end
 end
