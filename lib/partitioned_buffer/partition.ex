@@ -23,6 +23,7 @@ defmodule PartitionedBuffer.Partition do
             partition_index: nil,
             table_1: nil,
             table_2: nil,
+            ets_type: nil,
             processor: nil,
             processing_interval_ms: nil,
             processing_timeout_ms: nil,
@@ -34,20 +35,17 @@ defmodule PartitionedBuffer.Partition do
             processing?: false,
             start_time: nil
 
-  # Table key
-  # The `timestamp` will ensure the order by insertion time (asc) while the
-  # `ref` will make each entry unique since there may be multiple entries
-  # with the same timestamp
-  defrecordp(:key, timestamp: nil, ref: nil)
+  # Table record (generic container for any key/value entry)
+  defrecordp(:entry, key: nil, value: nil, version: 0)
 
-  # Table record
-  defrecordp(:message, key: nil, value: nil)
-
-  @typedoc "Proxy type for a message"
-  @type message() :: PartitionedBuffer.message()
+  @typedoc "Entry record"
+  @type entry() :: record(:entry, key: any(), value: any(), version: integer())
 
   # Telemetry prefix
   @telemetry_prefix [:partitioned_buffer, :partition]
+
+  # Inline instructions
+  @compile [inline: [new_entry: 2, new_entry: 3]]
 
   ## API
 
@@ -60,23 +58,71 @@ defmodule PartitionedBuffer.Partition do
   end
 
   @doc """
-  Writes a batch of `messages` into the given `partition`.
-  """
-  @spec write(atom(), [message()]) :: :ok
-  def write(partition, messages) when is_list(messages) do
-    entries =
-      Enum.map(
-        messages,
-        &message(
-          key: key(timestamp: System.monotonic_time(), ref: make_ref()),
-          value: &1
-        )
-      )
+  Puts a batch of pre-built entries into the given `partition`.
 
+  Each entry must be created with `new_entry/3`.
+  """
+  @spec put(atom(), [entry()]) :: :ok
+  def put(partition, entries) when is_list(entries) do
     true =
       partition
       |> get_current_table()
       |> :ets.insert(entries)
+
+    :ok
+  end
+
+  @doc """
+  Puts a batch of versioned entries into the given `partition`.
+
+  Uses "newer version wins" semantics: an entry is only written if:
+  - The key doesn't exist (insert), or
+  - The new version is greater than the existing version (conditional update)
+
+  Each entry must be created with `new_entry/3`.
+  """
+  @spec put_newer(atom(), [entry()]) :: :ok
+  def put_newer(partition, entries) when is_list(entries) do
+    table = get_current_table(partition)
+
+    Enum.each(entries, fn entry(key: key, value: value, version: version) = entry ->
+      # Try to insert as new entry first
+      case :ets.insert_new(table, entry) do
+        true ->
+          # Entry was new, we're done
+          :ok
+
+        false ->
+          # Entry exists, try conditional update with select_replace
+          match_spec = replace_match_spec(key, value, version)
+
+          :ets.select_replace(table, match_spec)
+      end
+    end)
+  end
+
+  @doc """
+  Gets the value for the given `key` from the `partition`'s current ETS table.
+
+  Returns `default` if the key is not found.
+  """
+  @spec get(atom(), any(), any()) :: any()
+  def get(partition, key, default \\ nil) do
+    case partition |> get_current_table() |> :ets.lookup(key) do
+      [entry(value: value)] -> value
+      [] -> default
+    end
+  end
+
+  @doc """
+  Deletes an entry by key from the given `partition`.
+  """
+  @spec delete(atom(), any()) :: :ok
+  def delete(partition, key) do
+    true =
+      partition
+      |> get_current_table()
+      |> :ets.delete(key)
 
     :ok
   end
@@ -91,6 +137,14 @@ defmodule PartitionedBuffer.Partition do
     |> :ets.info(:size)
   end
 
+  @doc """
+  Creates a new entry.
+  """
+  @spec new_entry(any(), any(), integer()) :: entry()
+  def new_entry(key, value, version \\ 0) when is_integer(version) do
+    entry(key: key, value: value, version: version)
+  end
+
   ## GenServer callbacks
 
   @impl true
@@ -100,11 +154,15 @@ defmodule PartitionedBuffer.Partition do
 
     # Get options
     buffer = Keyword.fetch!(opts, :name)
+    module = Keyword.fetch!(opts, :module)
     partition_index = Keyword.fetch!(opts, :partition_index)
     processing_interval = Keyword.fetch!(opts, :processing_interval_ms)
     processing_timeout = Keyword.fetch!(opts, :processing_timeout_ms)
     processing_batch_size = Keyword.fetch!(opts, :processing_batch_size)
     processor = Keyword.fetch!(opts, :processor)
+
+    # Get the ETS table type from the implementation module
+    ets_type = module.ets_type()
 
     # Generate the partition name
     partition = Module.concat([buffer, to_string(partition_index)])
@@ -112,12 +170,12 @@ defmodule PartitionedBuffer.Partition do
     table1 =
       [partition, Table1]
       |> Module.concat()
-      |> new_processing_table()
+      |> new_processing_table(ets_type)
 
     table2 =
       [partition, Table2]
       |> Module.concat()
-      |> new_processing_table()
+      |> new_processing_table(ets_type)
 
     :ok = put_current_table(partition, table1)
 
@@ -139,6 +197,7 @@ defmodule PartitionedBuffer.Partition do
         partition_index: partition_index,
         table_1: table1,
         table_2: table2,
+        ets_type: ets_type,
         processor: processor,
         processing_interval_ms: processing_interval,
         processing_timeout_ms: processing_timeout,
@@ -211,6 +270,7 @@ defmodule PartitionedBuffer.Partition do
           buffer: buffer,
           partition: partition,
           start_time: start_time,
+          ets_type: ets_type,
           processing_batch_size: batch_size,
           processor: processor
         }
@@ -226,7 +286,7 @@ defmodule PartitionedBuffer.Partition do
     # `process_batch' is used to perform a blocking process
     partition
     |> get_current_table()
-    |> process_batch(batch_size, processor)
+    |> process_batch(ets_type, batch_size, processor)
   end
 
   ## Private functions
@@ -239,6 +299,7 @@ defmodule PartitionedBuffer.Partition do
            partition: partition,
            table_1: table1,
            table_2: table2,
+           ets_type: ets_type,
            task_supervisor_name: task_supervisor_name,
            processor: processor,
            processing_timeout_ms: processing_timeout,
@@ -273,7 +334,7 @@ defmodule PartitionedBuffer.Partition do
       task =
         Task.Supervisor.async_nolink(
           task_supervisor_name,
-          fn -> send_messages(self, buffer, partition, size, batch_size, processor) end,
+          fn -> send_messages(self, buffer, partition, size, ets_type, batch_size, processor) end,
           shutdown: processing_timeout
         )
 
@@ -292,7 +353,7 @@ defmodule PartitionedBuffer.Partition do
   end
 
   # Function for handling the processing asynchronously
-  defp send_messages(from, buffer, partition, size, batch_size, processor) do
+  defp send_messages(from, buffer, partition, size, ets_type, batch_size, processor) do
     # Trap exits for the `:shutdown` timeout to have an effect
     # See `Task.Supervisor.async_nolink/3` for more info
     Process.flag(:trap_exit, true)
@@ -310,7 +371,7 @@ defmodule PartitionedBuffer.Partition do
         {:"ETS-TRANSFER", table, ^from, :process} ->
           # Process the table data in batches to optimize the memory footprint
           # (avoid loading the entire table into the memory)
-          :ok = process_batch(table, batch_size, processor)
+          :ok = process_batch(table, ets_type, batch_size, processor)
 
           # We can safely delete the table since the data is already processed
           # and the current buffer points to another table
@@ -322,10 +383,22 @@ defmodule PartitionedBuffer.Partition do
     end)
   end
 
+  # Complete the processing
+  defp complete_processing(
+         %__MODULE__{handed_off_table: processing_table, ets_type: ets_type} = state
+       ) do
+    # Since the processing task is completed, we can safely create
+    # a new processing table reusing its name
+    ^processing_table = new_processing_table(processing_table, ets_type)
+
+    # Reset the state
+    %{state | processing?: false, runner_task: nil, handed_off_table: nil}
+  end
+
   # We're starting!
-  defp process_batch(table, batch_size, processor) do
+  defp process_batch(table, ets_type, batch_size, processor) do
     table
-    |> :ets.select(ets_match_spec(), batch_size)
+    |> :ets.select(ets_match_spec(ets_type), batch_size)
     |> process_batch(processor)
   end
 
@@ -345,43 +418,61 @@ defmodule PartitionedBuffer.Partition do
     |> process_batch(processor)
   end
 
-  # ETS match-spec to return only the values
-  defp ets_match_spec do
+  # ETS match-spec based on the buffer type:
+  # - :ordered_set (Queue): return only the value
+  # - :set (Map): return {key, value} tuple
+  defp ets_match_spec(type)
+
+  defp ets_match_spec(:ordered_set) do
     [
       {
-        message(key: :"$1", value: :"$2"),
+        entry(key: :"$1", value: :"$2", version: :_),
         [true],
         [:"$2"]
       }
     ]
   end
 
-  # Complete the processing
-  defp complete_processing(%__MODULE__{handed_off_table: processing_table} = state) do
-    # Since the processing task is completed, we can safely create
-    # a new processing table reusing its name
-    ^processing_table = new_processing_table(processing_table)
+  defp ets_match_spec(:set) do
+    [
+      {
+        entry(key: :"$1", value: :"$2", version: :_),
+        [true],
+        [{{:"$1", :"$2"}}]
+      }
+    ]
+  end
 
-    # Reset the state
-    %{state | processing?: false, runner_task: nil, handed_off_table: nil}
+  defp replace_match_spec(key, value, version) do
+    # Performance note: The key in the match head is a literal (bound value),
+    # not a pattern variable. This allows ETS to use its hash index for O(1)
+    # lookup rather than scanning the entire table.
+    [
+      {
+        # Match: {entry, key, value, existing_version} where key is literal
+        entry(key: key, value: :_, version: :"$1"),
+        # Guard (update only if): new_version > existing_version
+        [{:>, version, :"$1"}],
+        # Result: the new entry
+        [{entry(key: key, value: value, version: version)}]
+      }
+    ]
   end
 
   defp refresh_timer(%__MODULE__{timer_ref: timer_ref, processing_interval_ms: interval} = state) do
-    if timer_ref do
-      Process.cancel_timer(timer_ref)
-    end
+    if timer_ref, do: Process.cancel_timer(timer_ref)
 
     timer_ref = Process.send_after(self(), :processing, interval)
 
     %{state | timer_ref: timer_ref}
   end
 
-  defp new_processing_table(name) do
+  defp new_processing_table(name, ets_type) do
     :ets.new(name, [
-      :ordered_set,
+      ets_type,
       :named_table,
       :public,
-      keypos: message(:key) + 1,
+      keypos: entry(:key) + 1,
       write_concurrency: true,
       decentralized_counters: true
     ])

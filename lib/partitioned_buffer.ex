@@ -2,31 +2,13 @@ defmodule PartitionedBuffer do
   @moduledoc """
   ETS-based partitioned buffer for high-throughput data processing.
 
-  `PartitionedBuffer` is a generic, reusable buffering system that efficiently
-  buffers arbitrary data and periodically processes it using a configurable
-  processor function. It implements partitioning to reduce lock contention
-  during high-throughput writes, and uses double-buffering to ensure
-  zero-downtime processing.
+  `PartitionedBuffer` provides the shared infrastructure (routing, partition
+  lookup, lifecycle management) used by concrete buffer implementations:
 
-  ## Key Features
-
-    * **Partitioned buffering**: Messages are distributed across multiple
-      partitions using configurable routing, reducing lock contention.
-    * **Flexible routing**: Route messages by content (default), custom function,
-      or fixed key.
-    * **Double-buffering**: While one partition buffer is being processed,
-      another continues accepting writes for true concurrent operation.
-    * **Async processing**: Processing happens in separate tasks to avoid
-      blocking writes.
-    * **Configurable processor**: Provide any handler function to process
-      batches of data.
-    * **Graceful shutdown**: Remaining buffered data is processed before
-      the buffer terminates.
-    * **Telemetry**: Structured observability through telemetry events.
+    * `PartitionedBuffer.Queue` - Ordered queue buffer (insertion-time ordered).
+    * `PartitionedBuffer.Map` - Key-value map buffer (last-write-wins semantics).
 
   ## Architecture
-
-  This is what a buffer supervision tree looks like:
 
   ```asciidoc
                     [buffer_supervisor]
@@ -42,112 +24,16 @@ defmodule PartitionedBuffer do
                       [ETS table pair] [ETS table pair]      [ETS table pair]
   ```
 
-  The buffer supervisor spawns a `Registry` for partition discovery, a
-  `Task.Supervisor` for async processing, and a `PartitionSupervisor` to manage
-  the partition pool. The partition supervisor spawns N number of partition
-  `GenServer` children. Each partition manages two ETS tables that alternate
-  roles during processing:
+  ## Start options
 
-    * One table receives new writes.
-    * The other is processed asynchronously in batches.
+  #{PartitionedBuffer.Options.start_options_docs()}
 
-  Message routing is determined by hashing a "routing key" to select which
-  partition receives the message. The `:partition_key` option controls what
-  value is used as the routing key:
+  ## Runtime options
 
-    * **Default (no partition_key)**: The routing key is the message itself.
-      Messages with the same content are routed to the same partition.
+  The following runtime options are shared by `PartitionedBuffer.Queue` and
+  `PartitionedBuffer.Map`:
 
-    * **Function**: The routing key is computed by applying the function to
-      each message (e.g., `fn msg -> msg.user_id end`). This groups related
-      messages together. For example, all messages from the same user go to
-      the same partition.
-
-    * **MFA tuple**: A tuple of `{Module, Function, Args}` where the function
-      is applied with the message prepended to the arguments (e.g.,
-      `{MyApp.Router, :get_user_id, []}`). Useful for delegating routing logic
-      to a module function while keeping configuration declarative.
-
-    * **Static value**: You provide a fixed term (e.g., `:logs`) that is
-      used as the routing key for all messages. This gives you explicit
-      control over message routing.
-
-  The `:partition_key` option is fundamentally about deciding what value
-  determines which partition a message goes to. Use it to keep related
-  messages together (for ordering or state locality) or spread unrelated
-  messages across partitions (for parallelism).
-
-  Every `:processing_interval_ms`, each partition checks its buffer. If
-  messages exist, a processing cycle begins:
-
-    1. The current write table is swapped for the other table.
-    2. A processing task is spawned asynchronously.
-    3. The processor callback is invoked with batches of messages.
-    4. Once complete, the processed table is reset and becomes the write table
-      for the next cycle.
-
-  This design ensures writes are never blocked by processing operations.
-
-  ## Examples
-
-  ### Standalone Usage
-
-      # Start a buffer with a custom processor
-      {:ok, _sup_pid} = PartitionedBuffer.start_link(
-        name: :my_buffer,
-        processor: fn batch -> IO.inspect(batch) end
-      )
-
-      # Write messages to the buffer
-      :ok = PartitionedBuffer.write(:my_buffer, "message1")
-      :ok = PartitionedBuffer.write(:my_buffer, ["message2", "message3"])
-
-      # Check buffer size
-      size = PartitionedBuffer.buffer_size(:my_buffer)
-
-      # Stop the buffer gracefully (processes remaining messages)
-      :ok = PartitionedBuffer.stop(:my_buffer)
-
-  ### Adding to a Supervision Tree
-
-  To add a `PartitionedBuffer` as a child in your application's supervision
-  tree:
-
-      # In your application supervisor
-      defmodule MyApp.Application do
-        use Application
-
-        @impl true
-        def start(_type, _args) do
-          children = [
-            # ... other children ...
-            my_buffer_spec()
-          ]
-
-          opts = [strategy: :one_for_one, name: MyApp.Supervisor]
-          Supervisor.start_link(children, opts)
-        end
-
-        defp my_buffer_spec do
-          config =
-            :my_app
-            |> Application.get_env(:my_buffer, [])
-            |> Keyword.merge(
-              name: :my_buffer,
-              processor: &MyApp.EventProcessor.process_batch/1
-            )
-
-          {PartitionedBuffer, config}
-        end
-      end
-
-  In your configuration file, you can configure the buffer like this:
-
-      config :my_app, :my_buffer,
-        processing_interval_ms: :timer.minutes(1),
-        processing_timeout_ms: :timer.minutes(2),
-        processing_batch_size: 100,
-        partitions: 100
+  #{PartitionedBuffer.Options.runtime_options_docs()}
 
   ## Telemetry
 
@@ -202,48 +88,55 @@ defmodule PartitionedBuffer do
 
   """
 
-  alias PartitionedBuffer.{Options, Partition}
+  alias PartitionedBuffer.Partition
 
   @typedoc "Buffer name"
   @type buffer() :: atom()
 
-  @typedoc "Any term that will be buffered and processed"
-  @type message() :: any()
+  ## Callbacks
+
+  @doc """
+  Returns the ETS table type used by this buffer implementation.
+  """
+  @callback ets_type() :: :ordered_set | :set | :bag | :duplicate_bag
 
   ## API
 
   @doc """
   Starts a new buffer.
 
-  ## Options
+  > #### Prefer implementation-specific functions {: .tip}
+  >
+  > It is recommended to use `PartitionedBuffer.Queue.start_link/1` or
+  > `PartitionedBuffer.Map.start_link/1` instead, as they automatically
+  > set the `:module` option for you.
 
-  #{PartitionedBuffer.Options.start_options_docs()}
+  ## Examples
+
+      iex> PartitionedBuffer.start_link(
+      ...>   module: PartitionedBuffer.Queue,
+      ...>   name: :my_buffer
+      ...> )
+      {:ok, #PID<0.123.0>}
+
+  > Notice that the `:module` option must be set to `PartitionedBuffer.Queue` or
+  > `PartitionedBuffer.Map`.
 
   """
   @spec start_link(keyword()) :: Supervisor.on_start()
-  defdelegate start_link(opts \\ []), to: PartitionedBuffer.Supervisor
-
-  @doc """
-  Returns the buffer child spec.
-
-  ## Options
-
-  #{PartitionedBuffer.Options.start_options_docs()}
-
-  """
-  @spec child_spec(keyword()) :: Supervisor.child_spec()
-  defdelegate child_spec(opts \\ []), to: PartitionedBuffer.Supervisor
+  defdelegate start_link(opts), to: PartitionedBuffer.Supervisor
 
   @doc """
   Stops a buffer gracefully.
 
   ## Examples
 
-      :ok = PartitionedBuffer.stop(:my_buffer)
+      iex> PartitionedBuffer.stop(:my_buffer)
+      :ok
 
   """
   @spec stop(buffer() | pid(), reason :: any(), timeout()) :: :ok
-  def stop(buffer, reason \\ :normal, timeout \\ :infinity)
+  def stop(buffer, reason, timeout)
 
   def stop(buffer, reason, timeout) when is_atom(buffer) do
     [buffer, Supervisor]
@@ -256,52 +149,13 @@ defmodule PartitionedBuffer do
   end
 
   @doc """
-  Writes a message or a batch of messages into the buffer.
-
-  ## Parameters
-
-    * `buffer` - The buffer name (atom).
-    * `msg_or_batch` - A single message or a list of messages to write.
-    * `opts` - Optional write options.
-
-  ## Options
-
-  #{PartitionedBuffer.Options.write_options_docs()}
+  Returns the buffer size (total number of messages across all partitions).
 
   ## Examples
 
-      # Simple write with default routing
-      PartitionedBuffer.write(:my_buffer, "message1")
-      PartitionedBuffer.write(:my_buffer, ["msg2", "msg3"])
+      iex> PartitionedBuffer.buffer_size(:my_buffer)
+      10
 
-      # Custom partition routing using function
-      PartitionedBuffer.write(:my_buffer, user_event, partition_key: &(&1.user_id))
-
-      # Custom partition routing using MFA tuple (message prepended to args)
-      PartitionedBuffer.write(:my_buffer, event, partition_key: {MyApp.Router, :get_partition, []})
-
-      # Custom partition routing with fixed key (all messages to same partition)
-      PartitionedBuffer.write(:my_buffer, log_entry, partition_key: :logs)
-
-  """
-  @spec write(buffer(), message() | [message()], keyword()) :: :ok
-  def write(buffer, msg_or_batch, opts \\ [])
-
-  def write(buffer, batch, opts) when is_list(batch) do
-    opts = Options.validate_write_options!(opts)
-    partition_key = Keyword.fetch!(opts, :partition_key)
-
-    batch
-    |> Enum.group_by(&get_partition(buffer, partition_key, &1))
-    |> Enum.each(&Partition.write(elem(&1, 0), elem(&1, 1)))
-  end
-
-  def write(buffer, msg, opts) do
-    write(buffer, [msg], opts)
-  end
-
-  @doc """
-  Returns the buffer size (total number of messages across all partitions).
   """
   @spec buffer_size(buffer()) :: non_neg_integer()
   def buffer_size(buffer) do
@@ -311,15 +165,14 @@ defmodule PartitionedBuffer do
     |> Enum.sum()
   end
 
-  ## Private functions
+  ## Shared routing helpers (used by Queue, Map, etc.)
 
-  @compile {:inline, lookup: 1}
-  defp lookup(buffer) do
-    Registry.lookup(buffer, buffer)
-  end
-
-  defp get_partition(buffer, partition_key, msg) do
-    key = partition_key(partition_key, msg)
+  @doc """
+  Returns the partition based on the given arguments.
+  """
+  @spec get_partition(buffer(), any(), any()) :: atom()
+  def get_partition(buffer, partition_key, object) do
+    key = partition_key(partition_key, object)
 
     case lookup(buffer) do
       [] ->
@@ -334,23 +187,33 @@ defmodule PartitionedBuffer do
     end
   end
 
+  ## Private functions
+
+  @compile [inline: [lookup: 1]]
+  defp lookup(buffer) do
+    Registry.lookup(buffer, buffer)
+  end
+
+  # Compute the partition key
+  defp partition_key(partition_key, object)
+
   # The partition key is not provided, use the message hash as the key
-  defp partition_key(nil, msg) do
-    :erlang.phash2(msg)
+  defp partition_key(nil, object) do
+    :erlang.phash2(object)
   end
 
   # The partition key is a function, apply it to the message
-  defp partition_key(partition_key, msg) when is_function(partition_key, 1) do
-    partition_key.(msg)
+  defp partition_key(partition_key, object) when is_function(partition_key, 1) do
+    partition_key.(object)
   end
 
   # The partition key is an MFA tuple, apply it (the message is prepended to the args)
-  defp partition_key({m, f, a}, msg) when is_atom(m) and is_atom(f) and is_list(a) do
-    apply(m, f, [msg | a])
+  defp partition_key({m, f, a}, object) when is_atom(m) and is_atom(f) and is_list(a) do
+    apply(m, f, [object | a])
   end
 
   # The partition key is a static value, return it
-  defp partition_key(partition_key, _msg) do
+  defp partition_key(partition_key, _object) do
     partition_key
   end
 end

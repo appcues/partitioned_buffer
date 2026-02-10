@@ -1,5 +1,7 @@
-defmodule PartitionedBufferTest do
+defmodule PartitionedBuffer.QueueTest do
   use ExUnit.Case, async: false
+
+  alias PartitionedBuffer.Queue, as: Q
 
   # Omit logs during the tests
   @moduletag capture_log: true
@@ -28,13 +30,13 @@ defmodule PartitionedBufferTest do
     :ok
   end
 
-  describe "write/3" do
+  describe "push/3" do
     setup do
       self = self()
 
       pid =
         start_supervised!(
-          {PartitionedBuffer,
+          {Q,
            name: __MODULE__,
            processing_interval_ms: 500,
            processing_batch_size: 5,
@@ -46,7 +48,7 @@ defmodule PartitionedBufferTest do
     end
 
     test "ok: messages are processed in ordered batches", %{buffer: buff} do
-      assert PartitionedBuffer.buffer_size(buff) == 0
+      assert Q.size(buff) == 0
 
       {expected_batch1, expected_batch2} =
         Enum.map(1..10, fn i ->
@@ -54,24 +56,24 @@ defmodule PartitionedBufferTest do
         end)
         |> Enum.split(5)
 
-      # Write messages
-      assert PartitionedBuffer.write(buff, expected_batch1 ++ expected_batch2) == :ok
+      # Push messages
+      assert Q.push(buff, expected_batch1 ++ expected_batch2) == :ok
 
       # Make sure the processing completed
       assert_receive {@processing_stop_event, %{duration: _, size: 10},
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      # Write more message while processing
-      assert PartitionedBuffer.write(buff, expected_batch1) == :ok
+      # Push more messages while processing
+      assert Q.push(buff, expected_batch1) == :ok
 
       # Check the processed messages
       assert_receive {:process_completed, ^expected_batch1}, @default_timeout
       assert_receive {:process_completed, ^expected_batch2}, @default_timeout
       assert_receive {:process_completed, ^expected_batch1}, @default_timeout
 
-      # Write more after processing
-      assert PartitionedBuffer.write(buff, expected_batch2) == :ok
+      # Push more after processing
+      assert Q.push(buff, expected_batch2) == :ok
 
       # Make sure the processing completed
       assert_receive {@processing_stop_event, %{duration: _, size: 5},
@@ -81,15 +83,15 @@ defmodule PartitionedBufferTest do
       # Check the processed messages
       assert_receive {:process_completed, ^expected_batch2}, @default_timeout
 
-      assert PartitionedBuffer.buffer_size(buff) == 0
+      assert Q.size(buff) == 0
     end
 
-    test "ok: handles single message writes", %{buffer: buff} do
+    test "ok: handles single message pushes", %{buffer: buff} do
       msg = %{id: 1, data: "single"}
 
-      assert PartitionedBuffer.write(buff, msg) == :ok
+      assert Q.push(buff, msg) == :ok
 
-      assert PartitionedBuffer.buffer_size(buff) == 1
+      assert Q.size(buff) == 1
 
       # Wait for processing to complete
       assert_receive {@processing_stop_event, %{duration: _, size: 1},
@@ -100,11 +102,11 @@ defmodule PartitionedBufferTest do
     end
 
     test "ok: messages are partitioned using a function", %{buffer: buff} do
-      assert PartitionedBuffer.write(buff, %{id: 1, data: "message1"},
+      assert Q.push(buff, %{id: 1, data: "message1"},
                partition_key: &__MODULE__.partition_key_fun/1
              ) == :ok
 
-      assert PartitionedBuffer.buffer_size(buff) == 1
+      assert Q.size(buff) == 1
 
       assert_receive {@processing_stop_event, %{duration: _, size: 1},
                       %{buffer: ^buff, partition: _}},
@@ -112,11 +114,11 @@ defmodule PartitionedBufferTest do
     end
 
     test "ok: messages are partitioned using an MFA tuple", %{buffer: buff} do
-      assert PartitionedBuffer.write(buff, %{id: 1, data: "message1"},
+      assert Q.push(buff, %{id: 1, data: "message1"},
                partition_key: {__MODULE__, :partition_key_fun, []}
              ) == :ok
 
-      assert PartitionedBuffer.buffer_size(buff) == 1
+      assert Q.size(buff) == 1
 
       assert_receive {@processing_stop_event, %{duration: _, size: 1},
                       %{buffer: ^buff, partition: _}},
@@ -124,9 +126,10 @@ defmodule PartitionedBufferTest do
     end
 
     test "ok: messages are partitioned using a custom key", %{buffer: buff} do
-      assert PartitionedBuffer.write(buff, %{id: 1, data: "message1"}, partition_key: 1) == :ok
+      assert Q.push(buff, %{id: 1, data: "message1"}, partition_key: 1) ==
+               :ok
 
-      assert PartitionedBuffer.buffer_size(buff) == 1
+      assert Q.size(buff) == 1
 
       assert_receive {@processing_stop_event, %{duration: _, size: 1},
                       %{buffer: ^buff, partition: _}},
@@ -135,30 +138,30 @@ defmodule PartitionedBufferTest do
 
     test "error: no partitions available for the given buffer" do
       {:ok, buff} =
-        PartitionedBuffer.start_link(
+        Q.start_link(
           name: :error_buff,
           processor: &__MODULE__.test_processor(self(), &1),
           partitions: 0
         )
 
       assert_raise RuntimeError, ~r"no partitions available for buffer :error_buff", fn ->
-        PartitionedBuffer.write(:error_buff, "message")
+        Q.push(:error_buff, "message")
       end
 
-      assert PartitionedBuffer.stop(buff) == :ok
+      assert Q.stop(buff) == :ok
     end
   end
 
   describe "stop/3" do
     test "ok: stops the buffer" do
       {:ok, _} =
-        PartitionedBuffer.start_link(
+        Q.start_link(
           name: :stop_buff,
           processor: &__MODULE__.test_processor(self(), &1),
           partitions: 1
         )
 
-      assert PartitionedBuffer.stop(:stop_buff) == :ok
+      assert Q.stop(:stop_buff) == :ok
     end
   end
 
@@ -168,7 +171,7 @@ defmodule PartitionedBufferTest do
 
       pid =
         start_supervised!(
-          {PartitionedBuffer,
+          {Q,
            name: __MODULE__,
            processing_interval_ms: 10,
            processing_batch_size: 5,
@@ -180,7 +183,7 @@ defmodule PartitionedBufferTest do
     end
 
     test "error: task fails", %{buffer: buff} do
-      :ok = PartitionedBuffer.write(buff, %{error: true})
+      :ok = Q.push(buff, %{error: true})
 
       # Wait for the processing task to fail and emit the event
       assert_receive {@processing_failed_event, %{system_time: _},
@@ -191,7 +194,7 @@ defmodule PartitionedBufferTest do
     test "error: task exits", %{buffer: buff} do
       Process.flag(:trap_exit, true)
 
-      :ok = PartitionedBuffer.write(buff, %{exit: :exit})
+      :ok = Q.push(buff, %{exit: :exit})
 
       # Wait for the processing task to exit and emit the event
       assert_receive {@processing_failed_event, %{system_time: _},
@@ -216,7 +219,7 @@ defmodule PartitionedBufferTest do
 
       # Send a message with custom sleep time
       msg1 = %{sleep_ms: 500, data: "first"}
-      :ok = PartitionedBuffer.write(buff, msg1)
+      :ok = Q.push(buff, msg1)
 
       # Make sure the processing started
       assert_receive {@processing_start_event, %{}, %{buffer: ^buff, partition: _}},
@@ -227,7 +230,7 @@ defmodule PartitionedBufferTest do
 
       # Send another message while the processing is running
       msg2 = %{id: 2, data: "second"}
-      :ok = PartitionedBuffer.write(buff, msg2)
+      :ok = Q.push(buff, msg2)
 
       # Stop the buffer normally
       assert Supervisor.stop(pid) == :ok
@@ -249,7 +252,7 @@ defmodule PartitionedBufferTest do
 
       _pid =
         start_supervised!(
-          {PartitionedBuffer,
+          {Q,
            name: :partitioning_test,
            processing_interval_ms: 500,
            processing_batch_size: 10,
@@ -263,8 +266,8 @@ defmodule PartitionedBufferTest do
     test "ok: all messages are processed across partitions", %{buffer: buff} do
       batch = Enum.map(1..10, fn i -> %{id: i, data: "msg#{i}"} end)
 
-      # Write messages
-      :ok = PartitionedBuffer.write(buff, batch)
+      # Push messages
+      :ok = Q.push(buff, batch)
 
       # Make sure processing completed on both partitions
       assert_receive {@processing_stop_event, %{duration: _, size: s1},

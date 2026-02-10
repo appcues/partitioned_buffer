@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## Release 0.2.0
+
+### Added
+
+- `PartitionedBuffer.Map` — New key-value map buffer using `:set` ETS tables
+  with last-write-wins semantics. Exposes `put/4`, `put_all/3`, `get/3`,
+  `delete/3`, `size/1`, `stop/3`, `start_link/1`, etc.
+- `PartitionedBuffer.Map` – put_newer/5` and `put_all_newer/3` for versioned
+  conditional updates with "newer version wins" semantics. Uses ETS
+  `insert_new` + `select_replace` with a literal key for O(1) atomic updates.
+
+### Changed
+
+- Refactored the previous monolithic implementation into
+  `PartitionedBuffer.Queue`, extracting it as a concrete buffer implementation
+  behind the `PartitionedBuffer` behaviour. This sets the foundation for
+  multiple buffer types (e.g., `Map`).
+
 ## Release 0.1.1
 
 - Move `size` from metadata to measurements in the processing Telemetry span.

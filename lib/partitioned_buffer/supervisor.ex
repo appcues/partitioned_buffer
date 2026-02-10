@@ -7,9 +7,7 @@ defmodule PartitionedBuffer.Supervisor do
 
   ## API
 
-  @doc """
-  Starts the partitioned buffer supervisor.
-  """
+  @doc false
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
     opts = Options.validate_start_options!(opts)
