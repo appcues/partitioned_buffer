@@ -25,7 +25,7 @@ Add `:partitioned_buffer` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:partitioned_buffer, "~> 0.2.0"}
+    {:partitioned_buffer, "~> 0.2"}
   ]
 end
 ```
@@ -60,6 +60,7 @@ semantics. Entries with the same key overwrite previous values:
 
 ```elixir
 # Start a map buffer
+# The processor receives a list of {key, {value, updates}} tuples
 {:ok, _pid} =
   PartitionedBuffer.Map.start_link(
     name: :my_map,
