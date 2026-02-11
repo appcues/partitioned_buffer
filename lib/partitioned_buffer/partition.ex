@@ -36,10 +36,16 @@ defmodule PartitionedBuffer.Partition do
             start_time: nil
 
   # Table record (generic container for any key/value entry)
-  defrecordp(:entry, key: nil, value: nil, version: 0)
+  defrecordp(:entry, key: nil, value: nil, version: 0, updates: 0)
 
   @typedoc "Entry record"
-  @type entry() :: record(:entry, key: any(), value: any(), version: integer())
+  @type entry() ::
+          record(:entry,
+            key: any(),
+            value: any(),
+            version: integer(),
+            updates: non_neg_integer()
+          )
 
   # Telemetry prefix
   @telemetry_prefix [:partitioned_buffer, :partition]
@@ -420,13 +426,13 @@ defmodule PartitionedBuffer.Partition do
 
   # ETS match-spec based on the buffer type:
   # - :ordered_set (Queue): return only the value
-  # - :set (Map): return {key, value} tuple
+  # - :set (Map): return {key, {value, updates}} tuple
   defp ets_match_spec(type)
 
   defp ets_match_spec(:ordered_set) do
     [
       {
-        entry(key: :"$1", value: :"$2", version: :_),
+        entry(key: :"$1", value: :"$2", version: :_, updates: :_),
         [true],
         [:"$2"]
       }
@@ -436,9 +442,9 @@ defmodule PartitionedBuffer.Partition do
   defp ets_match_spec(:set) do
     [
       {
-        entry(key: :"$1", value: :"$2", version: :_),
+        entry(key: :"$1", value: :"$2", version: :_, updates: :"$3"),
         [true],
-        [{{:"$1", :"$2"}}]
+        [{{:"$1", {{:"$2", :"$3"}}}}]
       }
     ]
   end
@@ -449,12 +455,12 @@ defmodule PartitionedBuffer.Partition do
     # lookup rather than scanning the entire table.
     [
       {
-        # Match: {entry, key, value, existing_version} where key is literal
-        entry(key: key, value: :_, version: :"$1"),
+        # Match: {entry, key, value, existing_version, updates} where key is literal
+        entry(key: key, value: :_, version: :"$1", updates: :"$2"),
         # Guard (update only if): new_version > existing_version
         [{:>, version, :"$1"}],
-        # Result: the new entry
-        [{entry(key: key, value: value, version: version)}]
+        # Result: the new entry with incremented updates counter
+        [{entry(key: key, value: value, version: version, updates: {:+, :"$2", 1})}]
       }
     ]
   end

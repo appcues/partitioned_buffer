@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## Release 0.2.1
+
+### Enhancements
+
+- `PartitionedBuffer.Map` processor now receives `{key, {value, updates}}` tuples
+  instead of `{key, value}`. The `updates` field tracks the number of times an
+  existing key was updated (only for versioned updates via `put_newer/5` and
+  `put_all_newer/3`; regular `put/4` entries always have `updates` set to `0`).
+
 ## Release 0.2.0
 
 ### Added

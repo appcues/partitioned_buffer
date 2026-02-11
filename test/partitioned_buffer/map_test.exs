@@ -73,7 +73,7 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      assert_receive {:process_completed, [key1: "value1"]}, @default_timeout
+      assert_receive {:process_completed, [key1: {"value1", 0}]}, @default_timeout
     end
 
     test "ok: batch put with list of tuples", %{buffer: buff} do
@@ -89,7 +89,7 @@ defmodule PartitionedBuffer.MapTest do
                      @default_timeout
 
       assert_receive {:process_completed, batch}, @default_timeout
-      assert Enum.sort(batch) == [{:a, 1}, {:b, 2}, {:c, 3}]
+      assert Enum.sort(batch) == [a: {1, 0}, b: {2, 0}, c: {3, 0}]
     end
 
     test "ok: batch put with map", %{buffer: buff} do
@@ -105,7 +105,7 @@ defmodule PartitionedBuffer.MapTest do
                      @default_timeout
 
       assert_receive {:process_completed, batch}, @default_timeout
-      assert Enum.sort(batch) == [{:x, "hello"}, {:y, "world"}]
+      assert Enum.sort(batch) == [x: {"hello", 0}, y: {"world", 0}]
     end
 
     test "ok: last-write-wins for duplicate keys", %{buffer: buff} do
@@ -123,7 +123,7 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      assert_receive {:process_completed, [dup: "second"]}, @default_timeout
+      assert_receive {:process_completed, [dup: {"second", 0}]}, @default_timeout
     end
 
     test "ok: entries are processed in batches", %{buffer: buff} do
@@ -142,8 +142,8 @@ defmodule PartitionedBuffer.MapTest do
       assert length(batch1) == 5
       assert length(batch2) == 5
 
-      # Extract values from {key, value} tuples and sort
-      values = Enum.map(batch1 ++ batch2, fn {_k, v} -> v end)
+      # Extract values from {key, {value, updates}} tuples and sort
+      values = Enum.map(batch1 ++ batch2, fn {_k, {v, _u}} -> v end)
       assert Enum.sort(values) == Enum.to_list(1..10)
     end
 
@@ -266,7 +266,7 @@ defmodule PartitionedBuffer.MapTest do
                      @default_timeout
 
       # Only the kept entry should be processed
-      assert_receive {:process_completed, [to_keep: "stays"]}, @default_timeout
+      assert_receive {:process_completed, [to_keep: {"stays", 0}]}, @default_timeout
     end
   end
 
@@ -297,7 +297,7 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      assert_receive {:process_completed, [key1: "value1"]}, @default_timeout
+      assert_receive {:process_completed, [key1: {"value1", 0}]}, @default_timeout
     end
 
     test "ok: newer version wins", %{buffer: buff} do
@@ -314,7 +314,7 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      assert_receive {:process_completed, [key1: "v2"]}, @default_timeout
+      assert_receive {:process_completed, [key1: {"v2", 1}]}, @default_timeout
     end
 
     test "ok: older version is ignored", %{buffer: buff} do
@@ -331,7 +331,7 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      assert_receive {:process_completed, [key1: "v1"]}, @default_timeout
+      assert_receive {:process_completed, [key1: {"v1", 0}]}, @default_timeout
     end
 
     test "ok: same version is ignored", %{buffer: buff} do
@@ -348,7 +348,7 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _}},
                      @default_timeout
 
-      assert_receive {:process_completed, [key1: "v1"]}, @default_timeout
+      assert_receive {:process_completed, [key1: {"v1", 0}]}, @default_timeout
     end
 
     test "ok: put_all_newer with multiple entries", %{buffer: buff} do
@@ -370,7 +370,7 @@ defmodule PartitionedBuffer.MapTest do
                      @default_timeout
 
       assert_receive {:process_completed, batch}, @default_timeout
-      assert Enum.sort(batch) == [a: "val_a", b: "val_b", c: "val_c"]
+      assert Enum.sort(batch) == [a: {"val_a", 0}, b: {"val_b", 0}, c: {"val_c", 0}]
     end
 
     test "ok: put_all_newer respects version ordering", %{buffer: buff} do
@@ -399,7 +399,7 @@ defmodule PartitionedBuffer.MapTest do
                      @default_timeout
 
       assert_receive {:process_completed, batch}, @default_timeout
-      assert Enum.sort(batch) == [a: "a2", b: "b1"]
+      assert Enum.sort(batch) == [a: {"a2", 1}, b: {"b1", 0}]
     end
 
     test "ok: works with timestamp versions", %{buffer: buff} do
@@ -508,11 +508,12 @@ defmodule PartitionedBuffer.MapTest do
                       %{buffer: ^buff, partition: _, reason: :shutdown}},
                      @default_timeout
 
-      # Verify the entries were processed (Map returns {key, value} tuples)
-      assert_receive {:process_completed, [slow: %{sleep_ms: 500, data: "first"}]},
+      # Verify the entries were processed (Map returns {key, {value, updates}} tuples)
+      assert_receive {:process_completed, [slow: {%{sleep_ms: 500, data: "first"}, 0}]},
                      @default_timeout
 
-      assert_receive {:process_completed, [fast: %{id: 2, data: "second"}]}, @default_timeout
+      assert_receive {:process_completed, [fast: {%{id: 2, data: "second"}, 0}]},
+                     @default_timeout
     end
   end
 
@@ -558,16 +559,16 @@ defmodule PartitionedBuffer.MapTest do
 
   ## Helpers
 
-  # Map processor receives {key, value} tuples
-  def test_processor(_pid, [{_key, %{error: true}} | _]) do
+  # Map processor receives {key, {value, updates}} tuples
+  def test_processor(_pid, [{_key, {%{error: true}, _updates}} | _]) do
     raise "task error"
   end
 
-  def test_processor(_pid, [{_key, %{exit: reason}} | _]) do
+  def test_processor(_pid, [{_key, {%{exit: reason}, _updates}} | _]) do
     exit(reason)
   end
 
-  def test_processor(pid, [{_key, %{sleep_ms: time_ms}} | _] = chunk) do
+  def test_processor(pid, [{_key, {%{sleep_ms: time_ms}, _updates}} | _] = chunk) do
     :ok = Process.sleep(time_ms)
 
     send(pid, {:process_completed, chunk})
