@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## Release 0.2.2
+
+### Added
+
+- `update_options/2` for `PartitionedBuffer.Queue` and `PartitionedBuffer.Map`.
+  Allows updating `processing_interval_ms`, `processing_timeout_ms`, and
+  `processing_batch_size` at runtime across all partitions.
+
+### Enhancements
+
+- The `:processor` option now accepts an MFA tuple `{Module, Function, Args}`
+  in addition to anonymous functions. The batch is prepended to the arguments.
+
 ## Release 0.2.1
 
 ### Enhancements

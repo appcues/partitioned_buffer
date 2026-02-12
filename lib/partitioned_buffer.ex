@@ -55,13 +55,13 @@ defmodule PartitionedBuffer do
       when a partition begins processing a batch of messages.
 
       * Measurement: `%{system_time: integer}`
-      * Metadata: `%{buffer: atom, partition: atom, size: non_neg_integer}`
+      * Metadata: `%{buffer: atom, partition: atom}`
 
     * `[:partitioned_buffer, :partition, :processing, :stop]` - Dispatched
       when a partition completes processing a batch of messages.
 
-      * Measurement: `%{duration: native_time}`
-      * Metadata: `%{buffer: atom, partition: atom, size: non_neg_integer}`
+      * Measurement: `%{duration: native_time, size: non_neg_integer}`
+      * Metadata: `%{buffer: atom, partition: atom}`
 
     * `[:partitioned_buffer, :partition, :processing, :exception]` - Dispatched
       when an exception occurs during the processing.
@@ -73,7 +73,6 @@ defmodule PartitionedBuffer do
       %{
         buffer: atom,
         partition: atom,
-        size: non_neg_integer,
         kind: atom,
         reason: term,
         stacktrace: list
@@ -88,7 +87,7 @@ defmodule PartitionedBuffer do
 
   """
 
-  alias PartitionedBuffer.Partition
+  alias PartitionedBuffer.{Options, Partition}
 
   @typedoc "Buffer name"
   @type buffer() :: atom()
@@ -163,6 +162,29 @@ defmodule PartitionedBuffer do
     |> lookup()
     |> Enum.map(&Partition.buffer_size(elem(&1, 1)))
     |> Enum.sum()
+  end
+
+  @doc """
+  Updates the options for the buffer.
+
+  ## Options
+
+  #{Options.updatable_options_docs()}
+
+  ## Examples
+
+      iex> PartitionedBuffer.update_options(:my_buffer, processing_interval_ms: 1000)
+      :ok
+
+  > Notice that the options are updated for all partitions of the buffer.
+  """
+  @spec update_options(buffer(), keyword()) :: :ok
+  def update_options(buffer, opts) do
+    opts = Options.validate_updatable_options!(opts)
+
+    buffer
+    |> lookup()
+    |> Enum.each(&Partition.update_options(elem(&1, 0), opts))
   end
 
   ## Shared routing helpers (used by Queue, Map, etc.)
