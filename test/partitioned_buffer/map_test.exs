@@ -517,19 +517,82 @@ defmodule PartitionedBuffer.MapTest do
     end
   end
 
+  describe "processor as MFA" do
+    setup do
+      self = self()
+
+      start_supervised!(
+        {M,
+         name: :map_mfa_test,
+         processing_interval_ms: 500,
+         processing_batch_size: 5,
+         processor: {__MODULE__, :mfa_processor, [self]},
+         partitions: 1}
+      )
+
+      {:ok, buffer: :map_mfa_test}
+    end
+
+    test "ok: processes entries using MFA processor", %{buffer: buff} do
+      assert M.put(buff, :key1, "value1") == :ok
+
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      assert_receive {:process_completed, [key1: {"value1", 0}]}, @default_timeout
+    end
+  end
+
+  describe "update_options/2" do
+    setup do
+      self = self()
+
+      start_supervised!(
+        {M, name: __MODULE__, processor: &__MODULE__.test_processor(self, &1), partitions: 1}
+      )
+
+      {:ok, buffer: __MODULE__}
+    end
+
+    test "ok: updates the given options", %{buffer: buff} do
+      # Lower the interval so processing triggers
+      assert M.update_options(buff, processing_interval_ms: 200, processing_batch_size: 2) == :ok
+
+      # Insert 4 entries
+      assert M.put_all(buff, [{:a, 1}, {:b, 2}, {:c, 3}, {:d, 4}]) == :ok
+
+      # Wait for processing to complete (after 200ms)
+      assert_receive {@processing_stop_event, %{duration: _, size: 4},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      # Should receive 2 batches of 2 (batch_size is now 2)
+      assert_receive {:process_completed, batch1}, @default_timeout
+      assert_receive {:process_completed, batch2}, @default_timeout
+      assert length(batch1) == 2
+      assert length(batch2) == 2
+    end
+
+    test "error: raises on invalid options", %{buffer: buff} do
+      assert_raise NimbleOptions.ValidationError, fn ->
+        M.update_options(buff, processing_interval_ms: -1)
+      end
+    end
+  end
+
   describe "partitioning" do
     setup do
       self = self()
 
-      _pid =
-        start_supervised!(
-          {M,
-           name: :map_partitioning_test,
-           processing_interval_ms: 500,
-           processing_batch_size: 10,
-           partitions: 2,
-           processor: &__MODULE__.test_processor(self, &1)}
-        )
+      start_supervised!(
+        {M,
+         name: :map_partitioning_test,
+         processing_interval_ms: 500,
+         processing_batch_size: 10,
+         partitions: 2,
+         processor: &__MODULE__.test_processor(self, &1)}
+      )
 
       {:ok, buffer: :map_partitioning_test}
     end
@@ -576,6 +639,13 @@ defmodule PartitionedBuffer.MapTest do
 
   def test_processor(pid, chunk) do
     # Simulate processing time
+    :ok = Process.sleep(200)
+
+    send(pid, {:process_completed, chunk})
+  end
+
+  # MFA-compatible processor (batch is prepended to args)
+  def mfa_processor(chunk, pid) do
     :ok = Process.sleep(200)
 
     send(pid, {:process_completed, chunk})

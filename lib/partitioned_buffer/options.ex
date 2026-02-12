@@ -1,24 +1,8 @@
 defmodule PartitionedBuffer.Options do
   @moduledoc false
 
-  # Start options
-  start_opts = [
-    name: [
-      type: :atom,
-      required: true,
-      doc: """
-      The buffer name (used to identify the buffer).
-      """
-    ],
-    processor: [
-      type: {:fun, 1},
-      required: true,
-      doc: """
-      A callback function that processes batches of messages. Called with a list
-      of accumulated messages and should handle the processing logic (e.g., send
-      to external service, persist to database, etc.).
-      """
-    ],
+  # Updatable options
+  updatable_opts = [
     processing_interval_ms: [
       type: :pos_integer,
       required: false,
@@ -49,18 +33,46 @@ defmodule PartitionedBuffer.Options do
       processor callback. Messages are processed in batches of up to this size
       to optimize memory usage and processor performance.
       """
-    ],
-    partitions: [
-      type: :non_neg_integer,
-      required: false,
-      doc: """
-      Number of partitions to create. Each partition has its own buffer and
-      processing cycle. Defaults to `System.schedulers_online()` to match the
-      number of available schedulers. More partitions reduce lock contention
-      but increase per-partition overhead.
-      """
     ]
   ]
+
+  # Start options
+  start_opts =
+    [
+      name: [
+        type: :atom,
+        required: true,
+        doc: """
+        The buffer name (used to identify the buffer).
+        """
+      ],
+      processor: [
+        type: {:or, [:mfa, fun: 1]},
+        required: true,
+        doc: """
+        A callback that processes batches of messages. Called with a list
+        of accumulated messages and should handle the processing logic (e.g., send
+        to external service, persist to database, etc.).
+
+        Can be either:
+
+          * A function of arity 1: `fn batch -> ... end` or `&MyModule.process/1`.
+          * An MFA tuple `{Module, Function, Args}`: The batch is prepended to
+            the arguments, e.g., `{MyModule, :process, [extra_arg]}` will call
+            `MyModule.process(batch, extra_arg)`.
+        """
+      ],
+      partitions: [
+        type: :non_neg_integer,
+        required: false,
+        doc: """
+        Number of partitions to create. Each partition has its own buffer and
+        processing cycle. Defaults to `System.schedulers_online()` to match the
+        number of available schedulers. More partitions reduce lock contention
+        but increase per-partition overhead.
+        """
+      ]
+    ] ++ updatable_opts
 
   auto_opts = [
     module: [
@@ -120,6 +132,9 @@ defmodule PartitionedBuffer.Options do
   # Runtime options schema
   @runtime_opts_schema NimbleOptions.new!(runtime_opts)
 
+  # Updatable options schema
+  @updatable_opts_schema NimbleOptions.new!(updatable_opts)
+
   ## API
 
   @spec start_options_docs() :: binary()
@@ -132,6 +147,11 @@ defmodule PartitionedBuffer.Options do
     NimbleOptions.docs(@runtime_opts_schema)
   end
 
+  @spec updatable_options_docs() :: binary()
+  def updatable_options_docs do
+    NimbleOptions.docs(@updatable_opts_schema)
+  end
+
   @spec validate_start_options!(keyword()) :: keyword()
   def validate_start_options!(opts) do
     opts
@@ -142,5 +162,10 @@ defmodule PartitionedBuffer.Options do
   @spec validate_runtime_options!(keyword()) :: keyword()
   def validate_runtime_options!(opts) do
     NimbleOptions.validate!(opts, @runtime_opts_schema)
+  end
+
+  @spec validate_updatable_options!(keyword()) :: keyword()
+  def validate_updatable_options!(opts) do
+    NimbleOptions.validate!(opts, @updatable_opts_schema)
   end
 end

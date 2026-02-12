@@ -151,6 +151,14 @@ defmodule PartitionedBuffer.Partition do
     entry(key: key, value: value, version: version)
   end
 
+  @doc """
+  Updates the options for the partition.
+  """
+  @spec update_options(GenServer.server(), keyword()) :: :ok
+  def update_options(server, opts) do
+    GenServer.call(server, {:update_options, opts})
+  end
+
   ## GenServer callbacks
 
   @impl true
@@ -219,6 +227,16 @@ defmodule PartitionedBuffer.Partition do
   @impl true
   def handle_continue(:start_processing_timer, state) do
     {:noreply, refresh_timer(state)}
+  end
+
+  @impl true
+  def handle_call({:update_options, opts}, _from, state) do
+    state =
+      state
+      |> struct!(opts)
+      |> refresh_timer()
+
+    {:reply, :ok, state}
   end
 
   @impl true
@@ -416,12 +434,22 @@ defmodule PartitionedBuffer.Partition do
   # We're continuing!
   defp process_batch({results, continuation}, processor) do
     # Invoke the processor function
-    processor.(results)
+    invoke_processor(processor, results)
 
     # Continue processing the next batch
     continuation
     |> :ets.select()
     |> process_batch(processor)
+  end
+
+  # MFA processor
+  defp invoke_processor({m, f, a}, results) do
+    apply(m, f, [results | a])
+  end
+
+  # Function processor
+  defp invoke_processor(fun, results) when is_function(fun, 1) do
+    fun.(results)
   end
 
   # ETS match-spec based on the buffer type:

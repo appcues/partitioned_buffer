@@ -377,6 +377,22 @@ defmodule PartitionedBuffer.Map do
   @spec size(buffer()) :: non_neg_integer()
   defdelegate size(buffer), to: PartitionedBuffer, as: :buffer_size
 
+  @doc """
+  Updates the options for the map buffer.
+
+  ## Options
+
+  See `PartitionedBuffer.update_options/2` for the updatable options.
+
+  ## Examples
+
+      # Update the processing interval to 100ms
+      update_options(:my_buffer, processing_interval_ms: 100)
+
+  """
+  @spec update_options(buffer(), keyword()) :: :ok
+  defdelegate update_options(buffer, opts), to: PartitionedBuffer
+
   ## Callbacks
 
   @impl true
