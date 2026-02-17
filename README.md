@@ -60,7 +60,7 @@ semantics. Entries with the same key overwrite previous values:
 
 ```elixir
 # Start a map buffer
-# The processor receives a list of {key, {value, updates}} tuples
+# The processor receives a list of {key, value, version, updates} tuples
 {:ok, _pid} =
   PartitionedBuffer.Map.start_link(
     name: :my_map,

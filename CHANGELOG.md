@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## Release 0.3.0
+
+### Breaking Changes
+
+- `PartitionedBuffer.Map` processor now receives `{key, value, version, updates}`
+  tuples instead of `{key, {value, updates}}`. The `version` field is the entry
+  version set via `put_newer/5` and `put_all_newer/3` (`0` for regular `put/4`
+  entries). Existing processor functions must update their pattern matching
+  accordingly.
+
+### Bug Fixes
+
+- Fixed `select_replace` match spec in `put_newer/5` and `put_all_newer/3` when
+  keys or values are tuples or lists. Bare tuples in match spec bodies are
+  interpreted as operations by ETS, not as literal data. Added `ms_literal/1` to
+  wrap tuple/list values using the `{{...}}` constructor form.
+
 ## Release 0.2.2
 
 ### Added
