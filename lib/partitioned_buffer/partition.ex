@@ -454,7 +454,7 @@ defmodule PartitionedBuffer.Partition do
 
   # ETS match-spec based on the buffer type:
   # - :ordered_set (Queue): return only the value
-  # - :set (Map): return {key, {value, updates}} tuple
+  # - :set (Map): return {key, value, version, updates} tuple
   defp ets_match_spec(type)
 
   defp ets_match_spec(:ordered_set) do
@@ -470,9 +470,9 @@ defmodule PartitionedBuffer.Partition do
   defp ets_match_spec(:set) do
     [
       {
-        entry(key: :"$1", value: :"$2", version: :_, updates: :"$3"),
+        entry(key: :"$1", value: :"$2", version: :"$3", updates: :"$4"),
         [true],
-        [{{:"$1", {{:"$2", :"$3"}}}}]
+        [{{:"$1", :"$2", :"$3", :"$4"}}]
       }
     ]
   end
@@ -481,6 +481,12 @@ defmodule PartitionedBuffer.Partition do
     # Performance note: The key in the match head is a literal (bound value),
     # not a pattern variable. This allows ETS to use its hash index for O(1)
     # lookup rather than scanning the entire table.
+    #
+    # In match spec bodies, bare tuples are interpreted as operations/function
+    # calls, NOT as literal data. We wrap key and value with ms_literal/1 so
+    # tuples use the {{...}} constructor form that ETS understands. This handles
+    # tuples and lists (including nested combinations). Map keys/values with
+    # embedded tuples are a known limitation of ETS select_replace.
     [
       {
         # Match: {entry, key, value, existing_version, updates} where key is literal
@@ -488,9 +494,35 @@ defmodule PartitionedBuffer.Partition do
         # Guard (update only if): new_version > existing_version
         [{:>, version, :"$1"}],
         # Result: the new entry with incremented updates counter
-        [{entry(key: key, value: value, version: version, updates: {:+, :"$2", 1})}]
+        [
+          {entry(
+             key: ms_literal(key),
+             value: ms_literal(value),
+             version: version,
+             updates: {:+, :"$2", 1}
+           )}
+        ]
       }
     ]
+  end
+
+  # Wraps a term so it is safe to use as a literal in a match spec body.
+  # In match spec bodies, bare tuples are interpreted as operations — not
+  # data. The {{...}} form tells ETS to construct a tuple from its elements.
+  defp ms_literal(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.map(&ms_literal/1)
+    |> List.to_tuple()
+    |> then(&{&1})
+  end
+
+  defp ms_literal(value) when is_list(value) do
+    Enum.map(value, &ms_literal/1)
+  end
+
+  defp ms_literal(value) do
+    value
   end
 
   defp refresh_timer(%__MODULE__{timer_ref: timer_ref, processing_interval_ms: interval} = state) do

@@ -64,15 +64,15 @@ defmodule PartitionedBuffer.Map do
 
   ## Processor
 
-  The processor function receives a list of `{key, {value, updates}}` tuples,
-  where `updates` is the number of times an existing key was updated
-  (only tracked for versioned updates via `put_newer/5` and
-  `put_all_newer/3`; regular `put/4` entries always have `updates`
-  set to `0`):
+  The processor function receives a list of `{key, value, version, updates}`
+  tuples, where `version` is the entry version (set via `put_newer/5` and
+  `put_all_newer/3`; `0` for regular `put/4` entries), and `updates` is the
+  number of times an existing key was updated (only tracked for versioned
+  updates; regular `put/4` entries always have `updates` set to `0`):
 
       fn batch ->
-        # batch is [{key1, {value1, updates1}}, {key2, {value2, updates2}}, ...]
-        Enum.each(batch, fn {k, {v, _updates}} -> process(k, v) end)
+        # batch is [{key1, value1, version1, updates1}, {key2, value2, version2, updates2}, ...]
+        Enum.each(batch, fn {k, v, _version, _updates} -> process(k, v) end)
       end
 
   ## Options
