@@ -80,7 +80,8 @@ defmodule PartitionedBuffer.MixProject do
     [
       name: :partitioned_buffer,
       links: %{"GitHub" => @source_url},
-      files: ~w(lib .formatter.exs mix.exs README* CHANGELOG*)
+      files: ~w(lib .formatter.exs mix.exs README* CHANGELOG*),
+      licenses: ~w(MIT)
     ]
   end
 
