@@ -11,6 +11,39 @@ defmodule PartitionedBuffer.Partition do
   **"OTel batch processor"** to leverage all these properties.
 
   [otel_batch_processor]: https://github.com/open-telemetry/opentelemetry-erlang/blob/main/apps/opentelemetry/src/otel_batch_processor.erl
+
+  ## Double-Buffering Processing Cycle
+
+  ```asciidoc
+  Phase 1 — Buffering          Phase 2 — Processing
+  ===================          ====================
+
+  Client writes                 Timer fires :processing
+       |                              |
+       v                              v
+  +-----------+                 Swap pointer (A -> B)
+  | Table A   |<-- write        via persistent_term
+  | (current) |                       |
+  +-----------+                       v
+  | Table B   |                 +-----------+
+  | (idle)    |                 | Table B   |<-- write (new current)
+  +-----------+                 +-----------+
+                                | Table A   |-- give_away --> Task
+                                +-----------+       |
+                                                    v
+                                              :ets.select (batches)
+                                                    |
+                                              processor(batch)
+                                                    |
+                                              :ets.delete(Table A)
+                                                    |
+                                              :processing_completed
+
+  Phase 3 — Reset
+  ========================
+  Recreate Table A (empty)
+  Ready for next swap
+  ```
   """
 
   use GenServer
@@ -56,7 +89,7 @@ defmodule PartitionedBuffer.Partition do
   ## API
 
   @doc """
-  Starts a queue partition.
+  Starts a buffer partition.
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -242,7 +275,7 @@ defmodule PartitionedBuffer.Partition do
   @impl true
   def handle_info(message, state)
 
-  # It's time to process the messages, but there is a process in progress already
+  # It's time to process the messages, but there is a processing cycle in progress already
   def handle_info(:processing, %__MODULE__{processing?: true} = state) do
     # Postpone the next processing
     {:noreply, refresh_timer(state)}
@@ -307,7 +340,7 @@ defmodule PartitionedBuffer.Partition do
     )
 
     # Process messages before dying
-    # `process_batch' is used to perform a blocking process
+    # `process_batch` is used to perform a blocking process
     partition
     |> get_current_table()
     |> process_batch(ets_type, batch_size, processor)
@@ -393,13 +426,13 @@ defmodule PartitionedBuffer.Partition do
       # Receive the table transfer message
       receive do
         {:"ETS-TRANSFER", table, ^from, :process} ->
-          # Process the table data in batches to optimize the memory footprint
-          # (avoid loading the entire table into the memory)
+          # Process the table data
           :ok = process_batch(table, ets_type, batch_size, processor)
 
-          # We can safely delete the table since the data is already processed
-          # and the current buffer points to another table
-          true = :ets.delete(table)
+          # Delete the table if it still exists under its original name.
+          # In :table mode, the processor may have renamed the table
+          # (via :ets.rename/2) to keep it for later processing.
+          true = maybe_delete_table(table)
 
           # Acknowledge the process is completed
           {:processing_completed, %{size: size}, metadata}
@@ -419,7 +452,14 @@ defmodule PartitionedBuffer.Partition do
     %{state | processing?: false, runner_task: nil, handed_off_table: nil}
   end
 
-  # We're starting!
+  # Table mode: pass the ETS table directly to the processor
+  defp process_batch(table, _ets_type, :table, processor) do
+    invoke_processor(processor, table)
+
+    :ok
+  end
+
+  # Batch mode: read from the ETS table in batches
   defp process_batch(table, ets_type, batch_size, processor) do
     table
     |> :ets.select(ets_match_spec(ets_type), batch_size)
@@ -523,6 +563,15 @@ defmodule PartitionedBuffer.Partition do
 
   defp ms_literal(value) do
     value
+  end
+
+  # Deletes the table if it still exists under its original name.
+  # In :table mode, the processor may have renamed it to keep it.
+  defp maybe_delete_table(table) do
+    case :ets.info(table, :name) do
+      :undefined -> true
+      _ -> :ets.delete(table)
+    end
   end
 
   defp refresh_timer(%__MODULE__{timer_ref: timer_ref, processing_interval_ms: interval} = state) do

@@ -64,7 +64,7 @@ defmodule PartitionedBuffer do
       * Metadata: `%{buffer: atom, partition: atom}`
 
     * `[:partitioned_buffer, :partition, :processing, :exception]` - Dispatched
-      when an exception occurs during the processing.
+      when an exception occurs during processing.
 
       * Measurement: `%{duration: native_time}`
       * Metadata:

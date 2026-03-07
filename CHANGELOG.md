@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## Release 0.4.0
+
+### Enhancements
+
+- `:table` mode for `:processing_batch_size` option. When set to `:table`,
+  the ETS table name is passed directly to the processor instead of reading
+  and batching the data. This gives the processor full control over how it
+  reads and processes the table. The processor can optionally keep the table
+  for later processing by calling `:ets.rename/2` to free the original name
+  and `:ets.give_away/3` to transfer it to another process.
+  [#14](https://github.com/appcues/partitioned_buffer/issues/14).
+- Added ASCII data flow diagrams to `PartitionedBuffer.Queue`,
+  `PartitionedBuffer.Map`, and `PartitionedBuffer.Partition` module docs.
+- Minor documentation and comment fixes (grammar, typos, consistency).
+- Migrated CI from CircleCI to GitHub Actions.
+
 ## Release 0.3.0
 
 ### Breaking Changes
@@ -51,7 +67,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 - `PartitionedBuffer.Map` — New key-value map buffer using `:set` ETS tables
   with last-write-wins semantics. Exposes `put/4`, `put_all/3`, `get/3`,
   `delete/3`, `size/1`, `stop/3`, `start_link/1`, etc.
-- `PartitionedBuffer.Map` – put_newer/5` and `put_all_newer/3` for versioned
+- `PartitionedBuffer.Map` — `put_newer/5` and `put_all_newer/3` for versioned
   conditional updates with "newer version wins" semantics. Uses ETS
   `insert_new` + `select_replace` with a literal key for O(1) atomic updates.
 
@@ -64,7 +80,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/).
 
 ## Release 0.1.1
 
-- Move `size` from metadata to measurements in the processing Telemetry span.
+- Moved `size` from metadata to measurements in the processing Telemetry span.
   This change prevents high cardinality tags in Datadog, reducing monitoring
   costs while still allowing size to be tracked as a metric.
 

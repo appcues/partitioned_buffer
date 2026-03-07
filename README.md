@@ -1,4 +1,8 @@
-# PartitionedBuffer
+# PartitionedBuffer :bubbles:
+
+![CI](https://github.com/appcues/partitioned_buffer/workflows/CI/badge.svg)
+[![Hex.pm](http://img.shields.io/hexpm/v/partitioned_buffer.svg)](http://hex.pm/packages/partitioned_buffer)
+[![Documentation](http://img.shields.io/badge/Documentation-ff69b4)](https://hexdocs.pm/partitioned_buffer)
 
 An ETS-based partitioned buffer library for high-throughput data processing in
 Elixir.
@@ -25,7 +29,7 @@ Add `:partitioned_buffer` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:partitioned_buffer, "~> 0.2"}
+    {:partitioned_buffer, "~> 0.3"}
   ]
 end
 ```

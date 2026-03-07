@@ -1,20 +1,23 @@
 defmodule PartitionedBuffer.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.4.0"
   @source_url "https://github.com/appcues/partitioned_buffer"
 
   def project do
     [
       app: :partitioned_buffer,
       version: @version,
-      elixir: "~> 1.18",
+      elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
       deps: deps(),
 
       # Testing
       test_coverage: [tool: ExCoveralls, export: "test-coverage"],
+
+      # Usage rules
+      usage_rules: usage_rules(),
 
       # Dialyzer
       dialyzer: dialyzer(),
@@ -58,6 +61,9 @@ defmodule PartitionedBuffer.MixProject do
       # Benchmarks
       {:benchee, "~> 1.5", only: [:dev, :test]},
 
+      # Usage rules
+      {:usage_rules, "~> 1.2", only: :dev},
+
       # Docs
       {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
     ]
@@ -80,7 +86,7 @@ defmodule PartitionedBuffer.MixProject do
     [
       name: :partitioned_buffer,
       links: %{"GitHub" => @source_url},
-      files: ~w(lib .formatter.exs mix.exs README* CHANGELOG*),
+      files: ~w(lib usage-rules .formatter.exs mix.exs README* CHANGELOG*),
       licenses: ~w(MIT)
     ]
   end
@@ -90,7 +96,16 @@ defmodule PartitionedBuffer.MixProject do
       main: "PartitionedBuffer",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      canonical: "http://hexdocs.pm/partitioned_buffer"
+      canonical: "http://hexdocs.pm/partitioned_buffer",
+      groups_for_modules: [
+        # PartitionedBuffer
+        # PartitionedBuffer.Partition
+
+        "Buffer implementations": [
+          PartitionedBuffer.Queue,
+          PartitionedBuffer.Map
+        ]
+      ]
     ]
   end
 
@@ -103,6 +118,16 @@ defmodule PartitionedBuffer.MixProject do
         :unknown,
         :no_return
       ]
+    ]
+  end
+
+  defp usage_rules do
+    [
+      # The file to write usage rules into (required for usage_rules syncing)
+      file: "AGENTS.md",
+
+      # rules to include directly in AGENTS.md
+      usage_rules: :all
     ]
   end
 end
