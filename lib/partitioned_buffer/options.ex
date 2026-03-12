@@ -25,13 +25,29 @@ defmodule PartitionedBuffer.Options do
       """
     ],
     processing_batch_size: [
-      type: :pos_integer,
+      type: {:or, [:pos_integer, {:in, [:table]}]},
       required: false,
       default: 10,
       doc: """
-      Maximum number of messages to include in a single batch sent to the
-      processor callback. Messages are processed in batches of up to this size
-      to optimize memory usage and processor performance.
+      Controls how buffered data is passed to the processor callback.
+
+      Can be either:
+
+        * A positive integer (default `10`): Messages are read from the ETS
+          table in batches of up to this size using `ets:select` with
+          continuations. The processor is called once per batch. This
+          optimizes memory usage for large tables.
+
+        * `:table`: The ETS table name (an atom) is passed directly to the
+          processor instead of reading and batching the data. The processor
+          has full control over how it reads and processes the table.
+
+          After the processor returns, the buffer deletes the table and
+          reclaims the name. If you want to **keep the table** for later
+          processing, call `:ets.rename(table, new_name)` before returning
+          to free the original name for the buffer to reuse. You can then
+          optionally call `:ets.give_away/3` to transfer the renamed table
+          to another process.
       """
     ]
   ]

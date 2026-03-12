@@ -313,6 +313,54 @@ defmodule PartitionedBuffer.QueueTest do
     end
   end
 
+  describe "processing_batch_size: :table" do
+    setup do
+      self = self()
+
+      pid =
+        start_supervised!(
+          {Q,
+           name: :queue_table_test,
+           processing_interval_ms: 500,
+           processing_batch_size: :table,
+           processor: &__MODULE__.table_processor(self, &1),
+           partitions: 1}
+        )
+
+      {:ok, buffer: :queue_table_test, pid: pid}
+    end
+
+    test "ok: processor receives the ETS table", %{buffer: buff} do
+      msgs = [%{id: 1}, %{id: 2}, %{id: 3}]
+      assert Q.push(buff, msgs) == :ok
+
+      assert_receive {@processing_stop_event, %{duration: _, size: 3},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      assert_receive {:table_processed, table_name, 3}, @default_timeout
+      assert is_atom(table_name)
+    end
+
+    test "ok: processor can rename and give away the table", %{buffer: buff} do
+      # Push some messages
+      assert Q.push(buff, [%{id: 1}, %{id: 2}]) == :ok
+
+      # Wait for processing to complete
+      assert_receive {@processing_stop_event, %{duration: _, size: 2},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      assert_receive {:table_kept, kept_table}, @default_timeout
+
+      # The renamed table should still exist and be accessible
+      assert :ets.info(kept_table, :size) == 2
+
+      # Clean up
+      :ets.delete(kept_table)
+    end
+  end
+
   describe "partitioning" do
     setup do
       self = self()
@@ -380,6 +428,27 @@ defmodule PartitionedBuffer.QueueTest do
     :ok = Process.sleep(200)
 
     send(pid, {:process_completed, chunk})
+  end
+
+  # Table mode processor: reads the table and sends results back
+  def table_processor(pid, table) when is_atom(table) do
+    size = :ets.info(table, :size)
+
+    # On first call, just report the table; on second call, rename and keep it
+    if size > 2 do
+      send(pid, {:table_processed, table, size})
+    else
+      # Rename to free the original name, give away to the test process
+      # so the table survives the task exit, then notify
+      new_name = Module.concat([table, Copy])
+      :ets.rename(table, new_name)
+
+      if Process.alive?(pid) do
+        true = :ets.give_away(new_name, pid, :kept)
+
+        send(pid, {:table_kept, new_name})
+      end
+    end
   end
 
   def partition_key_fun(%{id: id}) do

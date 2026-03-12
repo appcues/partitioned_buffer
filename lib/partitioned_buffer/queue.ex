@@ -7,6 +7,34 @@ defmodule PartitionedBuffer.Queue do
   It implements partitioning to reduce lock contention during high-throughput
   writes, and uses double-buffering to ensure zero-downtime processing.
 
+  ## Data Flow
+
+  ```asciidoc
+  push(buffer, items)
+         |
+         v
+  +-------------------+
+  | Partition Routing |
+  | phash2(item, N)   |
+  +-------------------+
+     |         |         |
+     v         v         v
+  +-------+ +-------+ +-------+     ETS :ordered_set
+  | P 0   | | P 1   | | P N-1 |     Key: {monotonic_time, ref}
+  +-------+ +-------+ +-------+     Val: item
+     |         |         |
+     v         v         v
+  +--------------------------------------+
+  | processor(batch)                     |
+  | batch = [val1, val2, ...]            |
+  +--------------------------------------+
+  ```
+
+  Items are routed to partitions via `phash2`, stored in
+  `:ordered_set` ETS tables keyed by `{monotonic_time, ref}`
+  (ensuring insertion-time ordering with uniqueness), and
+  periodically flushed to the processor in batches.
+
   ## Examples
 
   ### Standalone Usage

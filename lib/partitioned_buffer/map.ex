@@ -13,6 +13,47 @@ defmodule PartitionedBuffer.Map do
   only written if the key doesn't exist or the new version is greater than
   the existing one.
 
+  ## Data Flow
+
+  ```asciidoc
+  put(buffer, key, value)          put_newer(buffer, key, value, version)
+         |                                    |
+         v                                    v
+  +--------------------+            +--------------------+
+  | Partition Routing  |            | Partition Routing  |
+  | phash2(key, N)     |            | phash2(key, N)     |
+  +--------------------+            +--------------------+
+         |                                    |
+         v                                    v
+  +------------------+              +---------------------------+
+  | :ets.insert      |              | 1. :ets.insert_new        |
+  | (last-write-wins)|              |    Key new? -> inserted   |
+  +------------------+              | 2. :ets.select_replace    |
+                    \\              |    new_ver > old_ver?     |
+                     \\             |    Yes -> updated         |
+                      \\            |    No  -> skipped         |
+                       \\           +---------------------------+
+                        \\            /
+                         v           v
+              +--------------------------------+
+              | ETS :set                       |
+              | {key, value, version, updates} |
+              +--------------------------------+
+                            |
+                            v
+              +--------------------------------------+
+              | processor(batch)                     |
+              | batch = [{k, v, ver,  updates}, ...] |
+              +--------------------------------------+
+  ```
+
+  Entries are routed to partitions via `phash2(key)` and stored in
+  `:set` ETS tables. Regular `put/4` uses simple `ets:insert`
+  (last-write-wins). Versioned `put_newer/5` uses a two-step
+  atomic approach: `ets:insert_new` for new keys, then
+  `ets:select_replace` for conditional "newer version wins"
+  updates.
+
   ## Examples
 
   ### Standalone Usage
