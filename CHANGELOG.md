@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## Release 0.4.1
+
+### Bug Fixes
+
+- Fixed `select_replace` match spec in `put_newer/5` and `put_all_newer/3` when
+  values contain maps (including maps nested inside tuples or lists). Maps in
+  match spec bodies are now wrapped with `{:const, map}` via `ms_literal/1`,
+  which tells ETS to treat them as opaque literals.
+
 ## Release 0.4.0
 
 ### Enhancements
