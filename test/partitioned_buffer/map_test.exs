@@ -455,6 +455,49 @@ defmodule PartitionedBuffer.MapTest do
       assert_receive {:process_completed, [{^key, ^value1, 200, 1}]}, @default_timeout
     end
 
+    test "ok: updates existing entry with nested map value", %{buffer: buff} do
+      key = :nested_map
+
+      value0 = %{
+        users: %{admin: %{name: "alice", roles: [:admin, :user]}},
+        meta: %{nested: %{deep: %{level: 3}}}
+      }
+
+      value1 = %{
+        users: %{admin: %{name: {:x, "bob"}, roles: [:user]}},
+        meta: %{nested: %{deep: %{level: 5, extra: true}}}
+      }
+
+      assert M.put_newer(buff, key, value0, 100) == :ok
+      assert M.put_newer(buff, key, value1, 200) == :ok
+
+      assert M.size(buff) == 1
+      assert M.get(buff, key) == value1
+
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      assert_receive {:process_completed, [{^key, ^value1, 200, 1}]}, @default_timeout
+    end
+
+    test "ok: updates existing entry with tuple value containing maps", %{buffer: buff} do
+      value0 = {:ok, %{a: 1, b: %{c: [1, 2, %{d: 3}]}}}
+      value1 = {:ok, %{a: 2, b: %{c: [3, 4, %{d: 5}]}}}
+
+      assert M.put_newer(buff, :tuple_map, value0, 100) == :ok
+      assert M.put_newer(buff, :tuple_map, value1, 200) == :ok
+
+      assert M.size(buff) == 1
+      assert M.get(buff, :tuple_map) == value1
+
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      assert_receive {:process_completed, [{:tuple_map, ^value1, 200, 1}]}, @default_timeout
+    end
+
     test "error: put_newer raises ArgumentError for non-integer version", %{buffer: buff} do
       assert_raise ArgumentError, ~r/invalid entry/, fn ->
         M.put_newer(buff, :key1, "value1", "not_an_integer")

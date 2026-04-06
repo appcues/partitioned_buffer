@@ -524,9 +524,9 @@ defmodule PartitionedBuffer.Partition do
     #
     # In match spec bodies, bare tuples are interpreted as operations/function
     # calls, NOT as literal data. We wrap key and value with ms_literal/1 so
-    # tuples use the {{...}} constructor form that ETS understands. This handles
-    # tuples and lists (including nested combinations). Map keys/values with
-    # embedded tuples are a known limitation of ETS select_replace.
+    # tuples use the {{...}} constructor form and maps use {:const, map} that
+    # ETS understands. This handles tuples, maps, and lists (including nested
+    # combinations).
     [
       {
         # Match: {entry, key, value, existing_version, updates} where key is literal
@@ -549,6 +549,7 @@ defmodule PartitionedBuffer.Partition do
   # Wraps a term so it is safe to use as a literal in a match spec body.
   # In match spec bodies, bare tuples are interpreted as operations — not
   # data. The {{...}} form tells ETS to construct a tuple from its elements.
+  # Maps use {:const, map} to be treated as opaque literals.
   defp ms_literal(value) when is_tuple(value) do
     value
     |> Tuple.to_list()
@@ -559,6 +560,10 @@ defmodule PartitionedBuffer.Partition do
 
   defp ms_literal(value) when is_list(value) do
     Enum.map(value, &ms_literal/1)
+  end
+
+  defp ms_literal(value) when is_map(value) do
+    {:const, value}
   end
 
   defp ms_literal(value) do
