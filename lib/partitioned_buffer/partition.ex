@@ -332,18 +332,24 @@ defmodule PartitionedBuffer.Partition do
           processor: processor
         }
       ) do
+    # Process messages before dying
+    # `process_batch` is used to perform a blocking process
+    partition
+    |> get_current_table()
+    |> process_batch(ets_type, batch_size, processor)
+  after
+    # Erase the persistent_term entry so observers don't hold a stale atom
+    # after the GenServer (and its named tables) is gone.
+    partition
+    |> current_table_key()
+    |> :persistent_term.erase()
+
     # Emit stop event
     :telemetry.execute(
       @telemetry_prefix ++ [:stop],
       %{duration: System.monotonic_time() - start_time},
       %{buffer: buffer, partition: partition, reason: reason}
     )
-
-    # Process messages before dying
-    # `process_batch` is used to perform a blocking process
-    partition
-    |> get_current_table()
-    |> process_batch(ets_type, batch_size, processor)
   end
 
   ## Private functions

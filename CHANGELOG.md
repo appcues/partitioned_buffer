@@ -2,8 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-The format is based on [Keep a Changelog](http://keepachangelog.com/)
-and this project adheres to [Semantic Versioning](http://semver.org/).
+The format is based on [Keep a Changelog](https://keepachangelog.com/)
+and this project adheres to [Semantic Versioning](https://semver.org/).
+
+## Release 0.4.3
+
+### Bug Fixes
+
+- `PartitionedBuffer.Partition.terminate/2` now erases the partition's
+  `:persistent_term` entry before exiting. Previously the entry survived the
+  GenServer's death, leaving any external observer (or a buggy consumer) with
+  a stale atom that referenced a now-destroyed ETS table. Originally surfaced
+  via [appcues/partitioned_buffer#19](https://github.com/appcues/partitioned_buffer/issues/19),
+  observed downstream in [elixir-nebulex/nebulex_distributed#17](https://github.com/elixir-nebulex/nebulex_distributed/issues/17).
+
+## Release 0.4.2
+
+### Maintenance
+
+- Routine dependency updates.
+  [#17](https://github.com/appcues/partitioned_buffer/pull/17)
 
 ## Release 0.4.1
 
