@@ -514,6 +514,22 @@ defmodule PartitionedBuffer.MapTest do
         M.put_all_newer(buff, entries)
       end
     end
+
+    test "ok: updates existing entry with a key containing a map", %{buffer: buff} do
+      key = {:user, %{id: 1}}
+
+      assert M.put_newer(buff, key, "v1", 100) == :ok
+      assert M.put_newer(buff, key, "v2", 200) == :ok
+
+      assert M.size(buff) == 1
+      assert M.get(buff, key) == "v2"
+
+      assert_receive {@processing_stop_event, %{duration: _, size: 1},
+                      %{buffer: ^buff, partition: _}},
+                     @default_timeout
+
+      assert_receive {:process_completed, [{^key, "v2", 200, 1}]}, @default_timeout
+    end
   end
 
   describe "processing" do

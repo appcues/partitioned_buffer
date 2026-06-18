@@ -518,25 +518,27 @@ defmodule PartitionedBuffer.Partition do
   end
 
   defp replace_match_spec(key, value, version) do
-    # Performance note: The key in the match head is a literal (bound value),
-    # not a pattern variable. This allows ETS to use its hash index for O(1)
-    # lookup rather than scanning the entire table.
+    # The key is bound to "$3" and compared in the guard rather than embedded
+    # as a literal in the match head. ETS rejects raw maps in a match head at
+    # the key position (see :ets.select_replace/2), so keys that contain a map
+    # would raise "not a valid match specification". Comparing via the guard
+    # works for any term shape.
     #
-    # In match spec bodies, bare tuples are interpreted as operations/function
-    # calls, NOT as literal data. We wrap key and value with ms_literal/1 so
-    # tuples use the {{...}} constructor form and maps use {:const, map} that
-    # ETS understands. This handles tuples, maps, and lists (including nested
-    # combinations).
+    # In match spec bodies and guards, bare tuples are interpreted as
+    # operations/function calls, NOT as literal data. We wrap key and value
+    # with ms_literal/1 so tuples use the {{...}} constructor form and maps use
+    # {:const, map} that ETS understands. This handles tuples, maps, and lists
+    # (including nested combinations).
     [
       {
-        # Match: {entry, key, value, existing_version, updates} where key is literal
-        entry(key: key, value: :_, version: :"$1", updates: :"$2"),
-        # Guard (update only if): new_version > existing_version
-        [{:>, version, :"$1"}],
+        # Match: {entry, key, value, existing_version, updates}
+        entry(key: :"$3", value: :_, version: :"$1", updates: :"$2"),
+        # Guard (update only if): key matches and new_version > existing_version
+        [{:>, version, :"$1"}, {:"=:=", :"$3", ms_literal(key)}],
         # Result: the new entry with incremented updates counter
         [
           {entry(
-             key: ms_literal(key),
+             key: :"$3",
              value: ms_literal(value),
              version: version,
              updates: {:+, :"$2", 1}
