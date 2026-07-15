@@ -1,7 +1,7 @@
 defmodule PartitionedBuffer.MixProject do
   use Mix.Project
 
-  @version "0.4.2"
+  @version "0.4.3"
   @source_url "https://github.com/appcues/partitioned_buffer"
 
   def project do
@@ -96,7 +96,7 @@ defmodule PartitionedBuffer.MixProject do
       main: "PartitionedBuffer",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      canonical: "http://hexdocs.pm/partitioned_buffer",
+      canonical: "https://hexdocs.pm/partitioned_buffer",
       groups_for_modules: [
         # PartitionedBuffer
         # PartitionedBuffer.Partition

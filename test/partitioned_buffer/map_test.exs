@@ -40,6 +40,10 @@ defmodule PartitionedBuffer.MapTest do
         )
 
       assert M.stop(:map_stop_buff) == :ok
+
+      assert_receive {@partition_stop_event, %{duration: _},
+                      %{buffer: :map_stop_buff, partition: _, reason: _}},
+                     @default_timeout
     end
   end
 
