@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Routine dependency updates.
   [#17](https://github.com/appcues/partitioned_buffer/pull/17)
 
+## Unreleased
+
+### Bug Fixes
+
+- Fixed `put_newer/5` and `put_all_newer/3` raising `ArgumentError` ("not a
+  valid match specification") when the key contains a map. The key is now
+  bound to a match variable and compared in the guard, since ETS rejects raw
+  maps at the key position of a `select_replace/2` match head.
+  [#18](https://github.com/appcues/partitioned_buffer/issues/18).
+
 ## Release 0.4.1
 
 ### Bug Fixes
