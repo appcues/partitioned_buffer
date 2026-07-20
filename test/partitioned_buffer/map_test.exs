@@ -530,6 +530,18 @@ defmodule PartitionedBuffer.MapTest do
 
       assert_receive {:process_completed, [{^key, "v2", 200, 1}]}, @default_timeout
     end
+
+    test "ok: updates existing entry with a map nested inside a list key", %{buffer: buff} do
+      key = [:a, [%{id: 1}], :b]
+
+      assert M.put_newer(buff, key, "v1", 100) == :ok
+      assert M.put_newer(buff, key, "v2", 200) == :ok
+
+      assert M.size(buff) == 1
+      assert M.get(buff, key) == "v2"
+
+      assert_receive {:process_completed, [{^key, "v2", 200, 1}]}, @default_timeout
+    end
   end
 
   describe "processing" do

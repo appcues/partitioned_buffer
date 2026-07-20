@@ -518,12 +518,49 @@ defmodule PartitionedBuffer.Partition do
   end
 
   defp replace_match_spec(key, value, version) do
-    # The key is bound to "$3" and compared in the guard rather than embedded
-    # as a literal in the match head. ETS rejects raw maps in a match head at
-    # the key position (see :ets.select_replace/2), so keys that contain a map
-    # would raise "not a valid match specification". Comparing via the guard
-    # works for any term shape.
+    # Fast path: for keys that do not contain a map, embed the key as a literal
+    # in the match head. On :set/:ordered_set tables a fully bound key lets ETS
+    # do a single keyed lookup instead of a full table scan (see the note about
+    # bound keys in :ets.select_replace/2). This is the common case, so we keep
+    # it O(1).
     #
+    # Slow path: ETS rejects raw maps in the match head at the key position, so
+    # a key that contains a map anywhere would raise "not a valid match
+    # specification". For those keys we fall back to binding the key to "$3" and
+    # enforcing equality in the guard, which works for any term shape at the
+    # cost of a full scan. This only applies to map-containing keys, which
+    # triggered the original crash.
+    if key_has_map?(key) do
+      replace_match_spec_guarded(key, value, version)
+    else
+      replace_match_spec_literal(key, value, version)
+    end
+  end
+
+  defp replace_match_spec_literal(key, value, version) do
+    # In the match *head* the key is a structural pattern, so the raw term is
+    # used directly (tuples/lists match as-is). Only the *body* needs ms_literal/1
+    # to stop bare tuples from being read as match-spec operations.
+    [
+      {
+        # Match: {entry, key, value, existing_version, updates}
+        entry(key: key, value: :_, version: :"$1", updates: :"$2"),
+        # Guard (update only if): new_version > existing_version
+        [{:>, version, :"$1"}],
+        # Result: the new entry with incremented updates counter
+        [
+          {entry(
+             key: ms_literal(key),
+             value: ms_literal(value),
+             version: version,
+             updates: {:+, :"$2", 1}
+           )}
+        ]
+      }
+    ]
+  end
+
+  defp replace_match_spec_guarded(key, value, version) do
     # In match spec bodies and guards, bare tuples are interpreted as
     # operations/function calls, NOT as literal data. We wrap key and value
     # with ms_literal/1 so tuples use the {{...}} constructor form and maps use
@@ -547,6 +584,18 @@ defmodule PartitionedBuffer.Partition do
       }
     ]
   end
+
+  # Returns true if the term is, or contains anywhere, a map. Such keys cannot
+  # be embedded literally in an ETS match head, so they take the guarded path.
+  defp key_has_map?(value) when is_map(value), do: true
+
+  defp key_has_map?(value) when is_tuple(value) do
+    value |> Tuple.to_list() |> Enum.any?(&key_has_map?/1)
+  end
+
+  defp key_has_map?(value) when is_list(value), do: Enum.any?(value, &key_has_map?/1)
+
+  defp key_has_map?(_value), do: false
 
   # Wraps a term so it is safe to use as a literal in a match spec body.
   # In match spec bodies, bare tuples are interpreted as operations — not
